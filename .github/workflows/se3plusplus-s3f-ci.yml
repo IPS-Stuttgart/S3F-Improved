@@ -46,20 +46,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install Poetry
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install poetry
-
       - name: Install dependencies
         run: |
-          poetry env use "$(which python)"
-          poetry install
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
 
       - name: Run test suite
         run: |
           mkdir -p test-results
-          poetry run python -m pytest \
+          python -m pytest \
             --rootdir . \
             -q \
             --strict-config \
@@ -68,7 +63,7 @@ jobs:
 
       - name: Run WP1 CLI smoke experiment
         run: |
-          poetry run python -m se3plusplus_s3f.cli \
+          python -m se3plusplus_s3f.cli \
             wp1-relaxed-s3f \
             --grid-sizes 8 \
             --trials 1 \
@@ -78,7 +73,7 @@ jobs:
 
       - name: Validate WP1 smoke outputs
         run: |
-          poetry run python - <<'PY'
+          python - <<'PY'
           import csv
           from pathlib import Path
 
