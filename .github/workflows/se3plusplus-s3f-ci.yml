@@ -1,0 +1,175 @@
+name: SE3PlusPlusS3F CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/se3plusplus_s3f/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "README.md"
+      - ".github/workflows/se3plusplus-s3f-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/se3plusplus_s3f/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "README.md"
+      - ".github/workflows/se3plusplus-s3f-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  tests-and-smoke:
+    name: Tests + WP1 smoke (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install poetry
+
+      - name: Install dependencies
+        run: |
+          poetry env use "$(which python)"
+          poetry install
+
+      - name: Run test suite
+        run: |
+          mkdir -p test-results
+          poetry run python -m pytest \
+            --rootdir . \
+            -q \
+            --strict-config \
+            --junitxml=test-results/junit-py${{ matrix.python-version }}.xml \
+            tests
+
+      - name: Run WP1 CLI smoke experiment
+        run: |
+          poetry run python -m se3plusplus_s3f.cli \
+            wp1-relaxed-s3f \
+            --grid-sizes 8 \
+            --trials 1 \
+            --steps 2 \
+            --no-plots \
+            --output-dir ci_smoke/wp1_s1_r2_relaxed_s3f
+
+      - name: Validate WP1 smoke outputs
+        run: |
+          poetry run python - <<'PY'
+          import csv
+          from pathlib import Path
+
+          output_dir = Path("ci_smoke/wp1_s1_r2_relaxed_s3f")
+          metrics_path = output_dir / "relaxed_s3f_metrics.csv"
+          note_path = output_dir / "relaxed_s3f_pilot_note.md"
+
+          assert metrics_path.exists(), metrics_path
+          assert note_path.exists(), note_path
+
+          rows = list(csv.DictReader(metrics_path.open(newline="", encoding="utf-8")))
+          assert len(rows) == 3
+          assert {row["variant"] for row in rows} == {"baseline", "r1", "r1_r2"}
+          assert all(row["grid_size"] == "8" for row in rows)
+          assert all(float(row["position_rmse"]) >= 0.0 for row in rows)
+
+          print("Smoke rows:", rows)
+          PY
+
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-py${{ matrix.python-version }}
+          path: test-results/junit-py${{ matrix.python-version }}.xml
+
+      - name: Upload WP1 smoke artifact
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: se3plusplus-s3f-wp1-smoke
+          path: ci_smoke/wp1_s1_r2_relaxed_s3f
+
+  package-smoke:
+    name: Build package and run CLI entry point
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+          python -m build
+
+      - name: Install built wheel with dependencies
+        run: |
+          python -m pip install --force-reinstall dist/*.whl
+
+      - name: Verify CLI entry point from built package
+        run: |
+          se3plusplus-s3f --help > /dev/null
+          se3plusplus-s3f \
+            wp1-relaxed-s3f \
+            --grid-sizes 8 \
+            --trials 1 \
+            --steps 2 \
+            --no-plots \
+            --output-dir package_smoke/wp1_s1_r2_relaxed_s3f
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: se3plusplus-s3f-package-dist
+          path: dist/*
+
+  publish-results:
+    name: Publish unit test results
+    needs:
+      - tests-and-smoke
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: test-results
+
+      - name: Publish test results
+        if: (!cancelled())
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: "test-results/**/*.xml"
