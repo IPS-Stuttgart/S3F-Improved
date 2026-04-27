@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "SE3PlusPlusS3F"
+version = "0.0.1"
+description = "Experiments for multiresolution Rao-Blackwellized grid filters on SE(3)++"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    "matplotlib",
+    "numpy",
+    "pyrecest",
+    "scipy",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+]
+
+[project.scripts]
+se3plusplus-s3f = "se3plusplus_s3f.cli:main"
+
+[project.urls]
+Repository = "https://github.com/FlorianPfaff/SE3PlusPlusS3F"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.poetry]
+requires-poetry = ">=2.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.mypy]
+check_untyped_defs = true
+
+[tool.ruff]
+line-length = 180
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:mpmath.*",
+    "ignore::scipy.optimize.OptimizeWarning",
+]
+
+[tool.pylint.MAIN]
+py-version = "3.13"
+fail-under = 10
+ignore = ["CVS"]
+ignored-modules = [
+    "pyrecest.backend",
+    "healpy",
+]
+
+[tool.pylint."MESSAGES CONTROL"]
+disable = [
+  "raw-checker-failed",
+  "bad-inline-option",
+  "locally-disabled",
+  "file-ignored",
+  "suppressed-message",
+  "useless-suppression",
+  "deprecated-pragma",
+  "use-symbolic-message-instead",
+  "C",
+  "W0221",
+  "cyclic-import",
+  "duplicate-code",
+]
+
+[tool.pylint.FORMAT]
+max-line-length = 180
+
+[tool.pylint.DESIGN]
+max-args = 6
+max-parents = 15
+max-public-methods = 25
+min-public-methods = 0
