@@ -7,13 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from scipy.special import i0
-
-from .relaxed_s3f_circular import (
+from pyrecest.filters.relaxed_s3f_circular import (
     SUPPORTED_RELAXED_S3F_VARIANTS,
     circular_error,
     rotation_matrix,
 )
+from scipy.special import i0
+
 from .s3f_common import (
     linear_position_error_stats,
     make_linear_likelihood,

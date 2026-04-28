@@ -12,13 +12,12 @@ from pyrecest.distributions.hypertorus.hypertoroidal_grid_distribution import (
     HypertoroidalGridDistribution,
 )
 from pyrecest.distributions.nonperiodic.gaussian_distribution import GaussianDistribution
-from pyrecest.filters.state_space_subdivision_filter import StateSpaceSubdivisionFilter
-
-from .relaxed_s3f_circular import (
+from pyrecest.filters.relaxed_s3f_circular import (
     circular_weighted_mean,
     grid_probability_masses,
     predict_circular_relaxed,
 )
+from pyrecest.filters.state_space_subdivision_filter import StateSpaceSubdivisionFilter
 
 
 def make_s3f_filter(
@@ -99,6 +98,12 @@ def linear_position_error_stats(
     covariance_reg = covariance + 1e-10 * np.eye(error.shape[0])
     nees = float(error @ np.linalg.solve(covariance_reg, error))
     return error, nees
+
+
+def linear_position_mean(filter_: StateSpaceSubdivisionFilter) -> np.ndarray:
+    """Return the current linear position mean."""
+
+    return np.asarray(filter_.filter_state.linear_mean(), dtype=float)
 
 
 def orientation_mode_and_mean(filter_: StateSpaceSubdivisionFilter) -> tuple[float, float]:

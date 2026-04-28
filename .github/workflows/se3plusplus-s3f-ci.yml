@@ -99,6 +99,48 @@ jobs:
           print("Smoke rows:", rows)
           PY
 
+      - name: Run high-resolution reference CLI smoke
+        if: matrix.python-version == '3.11'
+        run: |
+          python -m se3plusplus_s3f.cli \
+            wp1-highres-reference \
+            --grid-sizes 8 \
+            --reference-grid-size 16 \
+            --trials 1 \
+            --steps 2 \
+            --no-plots \
+            --output-dir ci_smoke/wp1_s1_r2_highres_reference
+
+      - name: Validate high-resolution reference smoke outputs
+        if: matrix.python-version == '3.11'
+        run: |
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+
+          output_dir = Path("ci_smoke/wp1_s1_r2_highres_reference")
+          metrics_path = output_dir / "highres_reference_metrics.csv"
+          metadata_path = output_dir / "run_metadata.json"
+          note_path = output_dir / "highres_reference_note.md"
+
+          for required_path in (metrics_path, metadata_path, note_path):
+              if not required_path.exists():
+                  raise FileNotFoundError(required_path)
+
+          rows = list(csv.DictReader(metrics_path.open(newline="", encoding="utf-8")))
+          if len(rows) != 3:
+              raise AssertionError(rows)
+          variants = {row["variant"] for row in rows}
+          if variants != {"baseline", "r1", "r1_r2"}:
+              raise AssertionError(variants)
+          for row in rows:
+              assert row["grid_size"] == "8", row
+              assert row["reference_grid_size"] == "16", row
+              assert float(row["position_rmse_to_reference"]) >= 0.0, row
+
+          print("High-resolution reference rows:", rows)
+          PY
+
       - name: Upload JUnit results
         if: always()
         uses: actions/upload-artifact@v4
@@ -111,7 +153,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: se3plusplus-s3f-wp1-smoke
-          path: ci_smoke/wp1_s1_r2_relaxed_s3f
+          path: |
+            ci_smoke/wp1_s1_r2_relaxed_s3f
+            ci_smoke/wp1_s1_r2_highres_reference
 
   package-smoke:
     name: Build package and run CLI entry point

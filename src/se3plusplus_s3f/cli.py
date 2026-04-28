@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .wp1.euroc_planar import EuRoCPlanarConfig, write_euroc_planar_outputs
+from .wp1.highres_reference import HighResReferenceConfig, write_highres_reference_outputs
 from .wp1.relaxed_s3f_pilot import PilotConfig, load_pilot_config, write_relaxed_s3f_pilot_outputs
 
 
@@ -22,6 +23,25 @@ def main() -> None:
             seed=args.seed if args.seed is not None else base_config.seed,
         )
         outputs = write_relaxed_s3f_pilot_outputs(
+            output_dir=args.output_dir,
+            config=config,
+            write_plots=not args.no_plots,
+        )
+        for label, path in outputs.items():
+            print(f"Wrote {label}: {path}")
+        return
+
+    if args.command == "wp1-highres-reference":
+        config = HighResReferenceConfig(
+            pilot=PilotConfig(
+                grid_sizes=tuple(args.grid_sizes),
+                n_trials=args.trials,
+                n_steps=args.steps,
+                seed=args.seed,
+            ),
+            reference_grid_size=args.reference_grid_size,
+        )
+        outputs = write_highres_reference_outputs(
             output_dir=args.output_dir,
             config=config,
             write_plots=not args.no_plots,
@@ -73,6 +93,22 @@ def _parse_args() -> argparse.Namespace:
     wp1.add_argument("--steps", type=int)
     wp1.add_argument("--seed", type=int)
     wp1.add_argument("--no-plots", action="store_true")
+
+    highres = subparsers.add_parser(
+        "wp1-highres-reference",
+        help="Compare coarse relaxed S3F variants against a high-resolution S3F reference.",
+    )
+    highres.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("results") / "wp1_s1_r2_highres_reference",
+    )
+    highres.add_argument("--grid-sizes", type=int, nargs="+", default=[8, 16, 32, 64])
+    highres.add_argument("--reference-grid-size", type=int, default=256)
+    highres.add_argument("--trials", type=int, default=16)
+    highres.add_argument("--steps", type=int, default=16)
+    highres.add_argument("--seed", type=int, default=17)
+    highres.add_argument("--no-plots", action="store_true")
 
     euroc = subparsers.add_parser(
         "wp1-euroc-planar",

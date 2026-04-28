@@ -13,15 +13,15 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from scipy.special import i0
-
-from .relaxed_s3f_circular import (
+from pyrecest.filters.relaxed_s3f_circular import (
     SUPPORTED_RELAXED_S3F_VARIANTS,
     circular_error,
     rotation_matrix,
 )
+from scipy.special import i0
+
+from .plotting import format_plot_list, write_metric_line_plots
 from .s3f_common import (
     linear_position_error_stats,
     make_linear_likelihood,
@@ -125,7 +125,7 @@ def load_pilot_config(path: Path) -> PilotConfig:
 def run_relaxed_s3f_pilot(config: PilotConfig = PilotConfig()) -> list[dict[str, float | int | str]]:
     """Run the relaxed-S3F benchmark and return one metrics row per variant/grid."""
 
-    trials = _generate_trials(config)
+    trials = generate_pilot_trials(config)
     rows: list[dict[str, float | int | str]] = []
 
     for n_cells in config.grid_sizes:
@@ -135,6 +135,12 @@ def run_relaxed_s3f_pilot(config: PilotConfig = PilotConfig()) -> list[dict[str,
             rows.append(_run_variant(config, trials, n_cells, variant))
 
     return rows
+
+
+def generate_pilot_trials(config: PilotConfig) -> list[dict[str, np.ndarray | float]]:
+    """Generate deterministic synthetic trials for the WP1 pilot config."""
+
+    return _generate_trials(config)
 
 
 def write_relaxed_s3f_pilot_outputs(
@@ -318,44 +324,12 @@ def _write_plots(output_dir: Path, rows: list[dict[str, float | int | str]]) -> 
         ("mean_nees", "Mean Position NEES", "mean_nees_vs_grid.png"),
         ("runtime_ms_per_step", "Runtime [ms/step]", "runtime_vs_grid.png"),
     ]
-
-    paths = []
-    for metric, ylabel, filename in plot_specs:
-        fig, ax = plt.subplots(figsize=(7.0, 4.2))
-        for variant in SUPPORTED_RELAXED_S3F_VARIANTS:
-            variant_rows = sorted(
-                [row for row in rows if row["variant"] == variant],
-                key=lambda row: int(row["grid_size"]),
-            )
-            xs = [int(row["grid_size"]) for row in variant_rows]
-            ys = [float(row[metric]) for row in variant_rows]
-            ax.plot(xs, ys, marker="o", linewidth=1.8, label=VARIANT_LABELS[variant])
-
-        ax.set_xlabel("Number of circular cells")
-        ax.set_ylabel(ylabel)
-        ax.grid(True, alpha=0.3)
-        ax.legend()
-        fig.tight_layout()
-        path = output_dir / filename
-        fig.savefig(path, dpi=160)
-        plt.close(fig)
-        paths.append(path)
-    return paths
+    return write_metric_line_plots(output_dir, rows, plot_specs, SUPPORTED_RELAXED_S3F_VARIANTS, VARIANT_LABELS)
 
 
-def _write_note(
-    path: Path,
-    rows: list[dict[str, float | int | str]],
-    metrics_path: Path,
-    plot_paths: list[Path],
-    config: PilotConfig,
-) -> None:
+def _write_note(path: Path, rows: list[dict[str, float | int | str]], metrics_path: Path, plot_paths: list[Path], config: PilotConfig) -> None:
     best_rmse = min(rows, key=lambda row: float(row["position_rmse"]))
     best_coverage = min(rows, key=lambda row: abs(float(row["coverage_95"]) - 0.95))
-
-    plot_lines = "\n".join(f"- `{plot_path.name}`" for plot_path in plot_paths)
-    if not plot_lines:
-        plot_lines = "- plots were disabled for this run"
 
     content = f"""# Relaxed S3F Pilot Note
 
@@ -383,7 +357,7 @@ coverage `{float(best_coverage["coverage_95"]):.3f}` and mean NEES
 
 ## Plots
 
-{plot_lines}
+{format_plot_list(plot_paths)}
 
 ## Interpretation
 
