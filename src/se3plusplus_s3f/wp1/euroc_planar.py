@@ -5,26 +5,21 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-from time import perf_counter
 
 import numpy as np
-from pyrecest.distributions.cart_prod.state_space_subdivision_gaussian_distribution import (
-    StateSpaceSubdivisionGaussianDistribution,
-)
-from pyrecest.distributions.hypertorus.hypertoroidal_grid_distribution import (
-    HypertoroidalGridDistribution,
-)
-from pyrecest.distributions.nonperiodic.gaussian_distribution import GaussianDistribution
-from pyrecest.filters.state_space_subdivision_filter import StateSpaceSubdivisionFilter
 from scipy.special import i0
 
 from .relaxed_s3f_circular import (
     SUPPORTED_RELAXED_S3F_VARIANTS,
     circular_error,
-    circular_weighted_mean,
-    grid_probability_masses,
-    predict_circular_relaxed,
     rotation_matrix,
+)
+from .s3f_common import (
+    linear_position_error_stats,
+    make_linear_likelihood,
+    make_s3f_filter,
+    orientation_mode_and_mean,
+    predict_update_linear_position,
 )
 
 
@@ -169,33 +164,21 @@ def _run_euroc_variant(
         body_increment_norms.append(float(np.linalg.norm(body_increment)))
 
         measurement = next_position + rng.normal(0.0, config.measurement_noise_std, size=2)
-        likelihood = GaussianDistribution(measurement, measurement_cov, check_validity=False)
-
-        start = perf_counter()
-        predict_circular_relaxed(
+        likelihood = make_linear_likelihood(measurement, measurement_cov)
+        runtime += predict_update_linear_position(
             filter_,
             body_increment,
-            variant=variant,
-            process_noise_cov=process_noise_cov,
+            variant,
+            process_noise_cov,
+            likelihood,
         )
-        filter_.update(likelihoods_linear=[likelihood])
-        runtime += perf_counter() - start
 
-        state = filter_.filter_state
-        mean = np.asarray(state.linear_mean(), dtype=float)
-        cov = np.asarray(state.linear_covariance(), dtype=float)
-        error = mean - next_position
+        error, nees = linear_position_error_stats(filter_, next_position)
         position_sq_error += float(error @ error)
-
-        cov_reg = cov + 1e-10 * np.eye(2)
-        nees = float(error @ np.linalg.solve(cov_reg, error))
         nees_sum += nees
         coverage_hits += int(nees <= 5.991464547107979)
 
-        weights = grid_probability_masses(state.gd.grid_values)
-        grid = np.asarray(state.gd.get_grid(), dtype=float).reshape(-1)
-        mode_yaw = float(grid[int(np.argmax(weights))])
-        mean_yaw = circular_weighted_mean(grid, weights)
+        mode_yaw, mean_yaw = orientation_mode_and_mean(filter_)
         orientation_mode_error += circular_error(mode_yaw, next_yaw)
         orientation_mean_error += circular_error(mean_yaw, next_yaw)
 
@@ -221,27 +204,14 @@ def _make_initial_filter(
     initial_position: np.ndarray,
     initial_yaw: float,
     config: EuRoCPlanarConfig,
-) -> StateSpaceSubdivisionFilter:
+):
     grid = np.linspace(0.0, 2.0 * np.pi, config.grid_size, endpoint=False)
     prior_values = np.exp(config.orientation_prior_kappa * np.cos(grid - initial_yaw)) / (
         2.0 * np.pi * i0(config.orientation_prior_kappa)
     )
     prior_values = prior_values / (np.sum(prior_values) * 2.0 * np.pi / config.grid_size)
-    gd = HypertoroidalGridDistribution(
-        prior_values,
-        grid_type="custom",
-        grid=grid.reshape(-1, 1),
-        enforce_pdf_nonnegative=True,
-    )
-    gd.normalize_in_place(warn_unnorm=False)
-
     initial_cov = np.eye(2) * config.initial_position_std**2
-    gaussians = [
-        GaussianDistribution(initial_position.copy(), initial_cov.copy(), check_validity=False)
-        for _ in range(config.grid_size)
-    ]
-    state = StateSpaceSubdivisionGaussianDistribution(gd, gaussians)
-    return StateSpaceSubdivisionFilter(state)
+    return make_s3f_filter(grid, prior_values, initial_position, initial_cov)
 
 
 def _slice_trajectory(

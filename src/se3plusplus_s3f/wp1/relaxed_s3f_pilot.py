@@ -5,27 +5,22 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-from time import perf_counter
 
 import matplotlib.pyplot as plt
 import numpy as np
-from pyrecest.distributions.cart_prod.state_space_subdivision_gaussian_distribution import (
-    StateSpaceSubdivisionGaussianDistribution,
-)
-from pyrecest.distributions.hypertorus.hypertoroidal_grid_distribution import (
-    HypertoroidalGridDistribution,
-)
-from pyrecest.distributions.nonperiodic.gaussian_distribution import GaussianDistribution
-from pyrecest.filters.state_space_subdivision_filter import StateSpaceSubdivisionFilter
 from scipy.special import i0
 
 from .relaxed_s3f_circular import (
     SUPPORTED_RELAXED_S3F_VARIANTS,
     circular_error,
-    circular_weighted_mean,
-    grid_probability_masses,
-    predict_circular_relaxed,
     rotation_matrix,
+)
+from .s3f_common import (
+    linear_position_error_stats,
+    make_linear_likelihood,
+    make_s3f_filter,
+    orientation_mode_and_mean,
+    predict_update_linear_position,
 )
 
 
@@ -93,26 +88,13 @@ def write_relaxed_s3f_pilot_outputs(
     return outputs
 
 
-def make_initial_filter(config: PilotConfig, n_cells: int) -> StateSpaceSubdivisionFilter:
+def make_initial_filter(config: PilotConfig, n_cells: int):
     """Construct the shared broad/multimodal initial S3F state."""
 
     grid = np.linspace(0.0, 2.0 * np.pi, n_cells, endpoint=False)
     prior_values = _orientation_prior_pdf(grid, config)
-    gd = HypertoroidalGridDistribution(
-        prior_values,
-        grid_type="custom",
-        grid=grid.reshape(-1, 1),
-        enforce_pdf_nonnegative=True,
-    )
-    gd.normalize_in_place(warn_unnorm=False)
-
     initial_cov = np.eye(2) * config.initial_position_std**2
-    gaussians = [
-        GaussianDistribution(np.zeros(2), initial_cov.copy(), check_validity=False)
-        for _ in range(n_cells)
-    ]
-    state = StateSpaceSubdivisionGaussianDistribution(gd, gaussians)
-    return StateSpaceSubdivisionFilter(state)
+    return make_s3f_filter(grid, prior_values, np.zeros(2), initial_cov)
 
 
 def _run_variant(
@@ -139,38 +121,22 @@ def _run_variant(
         measurements = np.asarray(trial["measurements"])
 
         for step, measurement in enumerate(measurements):
-            likelihood = GaussianDistribution(
-                measurement,
-                measurement_cov,
-                check_validity=False,
-            )
-
-            start = perf_counter()
-            predict_circular_relaxed(
+            likelihood = make_linear_likelihood(measurement, measurement_cov)
+            runtime += predict_update_linear_position(
                 filter_,
                 np.asarray(config.body_increment),
-                variant=variant,
-                process_noise_cov=process_noise_cov,
+                variant,
+                process_noise_cov,
+                likelihood,
             )
-            filter_.update(likelihoods_linear=[likelihood])
-            runtime += perf_counter() - start
 
-            state = filter_.filter_state
-            mean = np.asarray(state.linear_mean(), dtype=float)
-            cov = np.asarray(state.linear_covariance(), dtype=float)
-            error = mean - true_positions[step + 1]
+            error, nees = linear_position_error_stats(filter_, true_positions[step + 1])
             sq_error = float(error @ error)
             sum_position_sq_error += sq_error
-
-            cov_reg = cov + 1e-10 * np.eye(2)
-            nees = float(error @ np.linalg.solve(cov_reg, error))
             sum_nees += nees
             coverage_hits += int(nees <= 5.991464547107979)
 
-            weights = grid_probability_masses(state.gd.grid_values)
-            grid = np.asarray(state.gd.get_grid(), dtype=float).reshape(-1)
-            mode_angle = float(grid[int(np.argmax(weights))])
-            mean_angle = circular_weighted_mean(grid, weights)
+            mode_angle, mean_angle = orientation_mode_and_mean(filter_)
             sum_orientation_mode_error += circular_error(mode_angle, true_angle)
             sum_orientation_mean_error += circular_error(mean_angle, true_angle)
             n_metrics += 1
