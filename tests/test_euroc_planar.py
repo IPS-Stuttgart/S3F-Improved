@@ -3,7 +3,7 @@ import csv
 import numpy as np
 import numpy.testing as npt
 
-from se3plusplus_s3f.wp1.euroc_planar import (
+from se3plusplus_s3f.s1r2.euroc_planar import (
     EuRoCPlanarConfig,
     load_euroc_planar_groundtruth,
     run_euroc_planar_relaxed_s3f,

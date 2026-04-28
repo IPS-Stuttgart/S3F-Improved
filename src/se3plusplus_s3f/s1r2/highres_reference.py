@@ -1,4 +1,4 @@
-"""High-resolution S3F reference benchmark for the WP1 model problem."""
+"""High-resolution S3F reference benchmark for the S1 x R2 model problem."""
 
 from __future__ import annotations
 
@@ -253,7 +253,7 @@ def _row_from_accumulator(
 
 def _write_metadata(path: Path, rows: list[dict[str, float | int | str]], config: HighResReferenceConfig) -> None:
     content = {
-        "experiment": "wp1_s1_r2_highres_reference",
+        "experiment": "highres_reference",
         "config": highres_reference_config_to_dict(config),
         "metrics_schema": HIGHRES_REFERENCE_FIELDNAMES,
         "metrics_rows": len(rows),
@@ -292,7 +292,7 @@ def _write_note(path: Path, rows, metrics_path: Path, plot_paths: list[Path], co
 ## What Was Run
 
 This benchmark compares coarse-grid S3F variants against a high-resolution
-baseline S3F reference on the same synthetic WP1 `S1 x R2` trials. The reference
+baseline S3F reference on the same synthetic `S1 x R2` trials. The reference
 uses `{config.reference_grid_size}` cells and variant `{REFERENCE_VARIANT}`.
 
 - trials: {config.pilot.n_trials}

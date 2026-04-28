@@ -1,4 +1,4 @@
-"""WP1 relaxed S3F experiments."""
+"""S1 x R2 relaxed S3F experiments."""
 
 from .highres_reference import HighResReferenceConfig, run_highres_reference_benchmark
 from .relaxed_s3f_pilot import PilotConfig, run_relaxed_s3f_pilot

@@ -1,7 +1,7 @@
 # SE3PlusPlusS3F
 
 Experiments for multiresolution Rao-Blackwellized grid filters for `SE(3)` and
-`SE(3)++`, starting with the WP1 `S1 x R2` relaxed S3F pilot.
+`SE(3)++`, starting with the `S1 x R2` relaxed S3F pilot.
 
 This repository is intentionally experiment-specific. Reusable filtering
 infrastructure should move upstream to
@@ -23,23 +23,23 @@ For a minimal runtime install:
 python -m pip install -e .
 ```
 
-## Run the WP1 Pilot
+## Run the Relaxed S3F Pilot
 
 ```bash
-se3plusplus-s3f wp1-relaxed-s3f
+se3plusplus-s3f relaxed-s3f
 ```
 
 This writes a metrics CSV, plots, a run metadata JSON file, and a short note to
-`results/wp1_s1_r2_relaxed_s3f/`.
+`results/relaxed_s3f_pilot/`.
 
-To reproduce the committed WP1 result configuration exactly:
+To reproduce the fixed pilot result configuration exactly:
 
 ```bash
-python scripts/reproduce_wp1_results.py
+python scripts/reproduce_relaxed_s3f_results.py
 ```
 
 The fixed configuration is stored in
-`configs/wp1_relaxed_s3f_pilot.json`. The generated
+`configs/relaxed_s3f_pilot.json`. The generated
 `run_metadata.json` records the configuration, Python/platform details, package
 versions, and metrics schema for the run. Runtime columns are expected to vary
 by machine; the reference test checks deterministic behavioral metrics only.
@@ -47,7 +47,7 @@ by machine; the reference test checks deterministic behavioral metrics only.
 The same configuration can also be passed through the package CLI:
 
 ```bash
-se3plusplus-s3f wp1-relaxed-s3f --config configs/wp1_relaxed_s3f_pilot.json
+se3plusplus-s3f relaxed-s3f --config configs/relaxed_s3f_pilot.json
 ```
 
 ## Compare Against a High-Resolution S3F Reference
@@ -56,22 +56,22 @@ Before comparing against unrelated filters, the first controlled comparison is
 coarse relaxed S3F against an expensive high-resolution baseline S3F reference.
 
 ```bash
-se3plusplus-s3f wp1-highres-reference
+se3plusplus-s3f highres-reference
 ```
 
 This writes a metrics CSV, plots, metadata, and a short note to
-`results/wp1_s1_r2_highres_reference/`. The main approximation metrics are
+`results/highres_reference/`. The main approximation metrics are
 translation RMSE and circular orientation error relative to the high-resolution
 reference.
 
 ## Run a EuRoC Planar Smoke Test
 
 The EuRoC smoke path uses a single ground-truth trajectory file and projects it
-to the WP1 `S1 x R2` setting. It is a trajectory-geometry check, not a
+to the `S1 x R2` model setting. It is a trajectory-geometry check, not a
 visual-inertial frontend.
 
 ```bash
-se3plusplus-s3f wp1-euroc-planar --groundtruth-path path/to/MH_01_easy.txt
+se3plusplus-s3f euroc-planar --groundtruth-path path/to/MH_01_easy.txt
 ```
 
 The GitHub workflow `.github/workflows/euroc-mh01-smoke.yml` downloads the

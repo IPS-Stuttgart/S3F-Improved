@@ -1,4 +1,4 @@
-"""Plotting helpers shared by WP1 benchmark outputs."""
+"""Plotting helpers shared by S1 x R2 benchmark outputs."""
 
 from __future__ import annotations
 

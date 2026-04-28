@@ -11,3 +11,5 @@ ci_smoke/
 data/
 build/
 dist/
+results/*
+!results/.gitkeep

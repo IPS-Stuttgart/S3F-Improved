@@ -3,12 +3,12 @@ import csv
 import numpy as np
 import pytest
 
-from se3plusplus_s3f.wp1.highres_reference import (
+from se3plusplus_s3f.s1r2.highres_reference import (
     HighResReferenceConfig,
     run_highres_reference_benchmark,
     write_highres_reference_outputs,
 )
-from se3plusplus_s3f.wp1.relaxed_s3f_pilot import PilotConfig
+from se3plusplus_s3f.s1r2.relaxed_s3f_pilot import PilotConfig
 
 
 def test_highres_reference_benchmark_smoke(tmp_path):

@@ -1,4 +1,4 @@
-"""Shared WP1 S3F utilities used by the synthetic and EuRoC smoke runs."""
+"""Shared S1 x R2 S3F utilities used by the synthetic and EuRoC smoke runs."""
 
 from __future__ import annotations
 

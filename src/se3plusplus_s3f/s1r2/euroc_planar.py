@@ -1,4 +1,4 @@
-"""EuRoC ground-truth adapter for the WP1 S1 x R2 relaxed-S3F smoke test."""
+"""EuRoC ground-truth adapter for the S1 x R2 relaxed-S3F smoke test."""
 
 from __future__ import annotations
 
