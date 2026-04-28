@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import csv
+import json
+import platform
+import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from importlib import metadata
 from pathlib import Path
 from time import perf_counter
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,6 +42,19 @@ VARIANT_LABELS = {
     "r1_r2": "S3F + R1 + R2",
 }
 
+METRIC_FIELDNAMES = [
+    "grid_size",
+    "variant",
+    "position_rmse",
+    "orientation_mode_error_rad",
+    "orientation_mean_error_rad",
+    "mean_nees",
+    "coverage_95",
+    "runtime_ms_per_step",
+    "n_trials",
+    "n_steps",
+]
+
 
 @dataclass(frozen=True)
 class PilotConfig:
@@ -52,6 +72,59 @@ class PilotConfig:
     prior_modes: tuple[float, float] = (0.65, 3.85)
     prior_weights: tuple[float, float] = (0.55, 0.45)
     prior_kappa: float = 1.2
+
+
+def pilot_config_to_dict(config: PilotConfig) -> dict[str, Any]:
+    """Return a JSON-serializable representation of a pilot config."""
+
+    return {
+        "grid_sizes": list(config.grid_sizes),
+        "variants": list(config.variants),
+        "n_trials": config.n_trials,
+        "n_steps": config.n_steps,
+        "seed": config.seed,
+        "body_increment": list(config.body_increment),
+        "measurement_noise_std": config.measurement_noise_std,
+        "process_noise_std": config.process_noise_std,
+        "initial_position_std": config.initial_position_std,
+        "prior_modes": list(config.prior_modes),
+        "prior_weights": list(config.prior_weights),
+        "prior_kappa": config.prior_kappa,
+    }
+
+
+def pilot_config_from_dict(data: Mapping[str, Any]) -> PilotConfig:
+    """Build a pilot config from a JSON-like mapping."""
+
+    allowed_keys = set(pilot_config_to_dict(PilotConfig()))
+    unknown_keys = sorted(set(data) - allowed_keys)
+    if unknown_keys:
+        raise ValueError(f"Unknown pilot config keys: {unknown_keys}.")
+
+    default = PilotConfig()
+    return PilotConfig(
+        grid_sizes=tuple(int(value) for value in data.get("grid_sizes", default.grid_sizes)),
+        variants=tuple(str(value) for value in data.get("variants", default.variants)),
+        n_trials=int(data.get("n_trials", default.n_trials)),
+        n_steps=int(data.get("n_steps", default.n_steps)),
+        seed=int(data.get("seed", default.seed)),
+        body_increment=tuple(float(value) for value in data.get("body_increment", default.body_increment)),
+        measurement_noise_std=float(data.get("measurement_noise_std", default.measurement_noise_std)),
+        process_noise_std=float(data.get("process_noise_std", default.process_noise_std)),
+        initial_position_std=float(data.get("initial_position_std", default.initial_position_std)),
+        prior_modes=tuple(float(value) for value in data.get("prior_modes", default.prior_modes)),
+        prior_weights=tuple(float(value) for value in data.get("prior_weights", default.prior_weights)),
+        prior_kappa=float(data.get("prior_kappa", default.prior_kappa)),
+    )
+
+
+def load_pilot_config(path: Path) -> PilotConfig:
+    """Load a pilot config from a JSON file."""
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, Mapping):
+        raise ValueError(f"Expected a JSON object in {path}.")
+    return pilot_config_from_dict(data)
 
 
 def run_relaxed_s3f_pilot(config: PilotConfig = PilotConfig()) -> list[dict[str, float | int | str]]:
@@ -90,6 +163,10 @@ def write_relaxed_s3f_pilot_outputs(
     note_path = output_dir / "relaxed_s3f_pilot_note.md"
     _write_note(note_path, rows, metrics_path, plot_paths, config)
     outputs["note"] = note_path
+
+    metadata_path = output_dir / "run_metadata.json"
+    _write_metadata(metadata_path, rows, config)
+    outputs["metadata"] = metadata_path
     return outputs
 
 
@@ -228,22 +305,44 @@ def _orientation_prior_pdf(angles: np.ndarray, config: PilotConfig) -> np.ndarra
 
 
 def _write_csv(path: Path, rows: list[dict[str, float | int | str]]) -> None:
-    fieldnames = [
-        "grid_size",
-        "variant",
-        "position_rmse",
-        "orientation_mode_error_rad",
-        "orientation_mean_error_rad",
-        "mean_nees",
-        "coverage_95",
-        "runtime_ms_per_step",
-        "n_trials",
-        "n_steps",
-    ]
     with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer = csv.DictWriter(file, fieldnames=METRIC_FIELDNAMES)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _write_metadata(path: Path, rows: list[dict[str, float | int | str]], config: PilotConfig) -> None:
+    content = {
+        "experiment": "wp1_s1_r2_relaxed_s3f",
+        "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+        "config": pilot_config_to_dict(config),
+        "metrics_schema": METRIC_FIELDNAMES,
+        "metrics_rows": len(rows),
+        "python": {
+            "implementation": platform.python_implementation(),
+            "version": sys.version,
+        },
+        "platform": {
+            "machine": platform.machine(),
+            "release": platform.release(),
+            "system": platform.system(),
+        },
+        "packages": {
+            "SE3PlusPlusS3F": _package_version("SE3PlusPlusS3F"),
+            "matplotlib": _package_version("matplotlib"),
+            "numpy": _package_version("numpy"),
+            "pyrecest": _package_version("pyrecest"),
+            "scipy": _package_version("scipy"),
+        },
+    }
+    path.write_text(json.dumps(content, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _package_version(distribution_name: str) -> str | None:
+    try:
+        return metadata.version(distribution_name)
+    except metadata.PackageNotFoundError:
+        return None
 
 
 def _write_plots(output_dir: Path, rows: list[dict[str, float | int | str]]) -> list[Path]:

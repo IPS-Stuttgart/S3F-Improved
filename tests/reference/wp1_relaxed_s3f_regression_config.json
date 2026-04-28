@@ -1,0 +1,9 @@
+{
+  "grid_sizes": [
+    8,
+    16
+  ],
+  "n_steps": 5,
+  "n_trials": 6,
+  "seed": 11
+}

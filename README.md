@@ -25,8 +25,26 @@ python -m pip install -e .
 se3plusplus-s3f wp1-relaxed-s3f
 ```
 
-This writes a metrics CSV, plots, and a short note to
+This writes a metrics CSV, plots, a run metadata JSON file, and a short note to
 `results/wp1_s1_r2_relaxed_s3f/`.
+
+To reproduce the committed WP1 result configuration exactly:
+
+```bash
+python scripts/reproduce_wp1_results.py
+```
+
+The fixed configuration is stored in
+`configs/wp1_relaxed_s3f_pilot.json`. The generated
+`run_metadata.json` records the configuration, Python/platform details, package
+versions, and metrics schema for the run. Runtime columns are expected to vary
+by machine; the reference test checks deterministic behavioral metrics only.
+
+The same configuration can also be passed through the package CLI:
+
+```bash
+se3plusplus-s3f wp1-relaxed-s3f --config configs/wp1_relaxed_s3f_pilot.json
+```
 
 ## Test
 
