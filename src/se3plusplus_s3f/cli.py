@@ -6,7 +6,12 @@ import argparse
 from dataclasses import replace
 from pathlib import Path
 
-from .s1r2.baseline_comparison import BaselineComparisonConfig, write_baseline_comparison_outputs
+from .s1r2.baseline_comparison import (
+    BaselineComparisonConfig,
+    ParticleSensitivityConfig,
+    write_baseline_comparison_outputs,
+    write_particle_sensitivity_outputs,
+)
 from .s1r2.euroc_planar import EuRoCPlanarConfig, write_euroc_planar_outputs
 from .s1r2.highres_reference import HighResReferenceConfig, write_highres_reference_outputs
 from .s1r2.relaxed_s3f_pilot import PilotConfig, load_pilot_config, write_relaxed_s3f_pilot_outputs
@@ -63,6 +68,26 @@ def main() -> None:
             particle_seed=args.particle_seed,
         )
         outputs = write_baseline_comparison_outputs(
+            output_dir=args.output_dir,
+            config=config,
+            write_plots=not args.no_plots,
+        )
+        for label, path in outputs.items():
+            print(f"Wrote {label}: {path}")
+        return
+
+    if args.command == "particle-sensitivity":
+        config = ParticleSensitivityConfig(
+            pilot=PilotConfig(
+                grid_sizes=tuple(args.grid_sizes),
+                n_trials=args.trials,
+                n_steps=args.steps,
+                seed=args.seed,
+            ),
+            particle_counts=tuple(args.particle_counts),
+            particle_seed=args.particle_seed,
+        )
+        outputs = write_particle_sensitivity_outputs(
             output_dir=args.output_dir,
             config=config,
             write_plots=not args.no_plots,
@@ -147,6 +172,23 @@ def _parse_args() -> argparse.Namespace:
     comparison.add_argument("--particle-count", type=int, default=1024)
     comparison.add_argument("--particle-seed", type=int, default=101)
     comparison.add_argument("--no-plots", action="store_true")
+
+    sensitivity = subparsers.add_parser(
+        "particle-sensitivity",
+        help="Sweep particle counts against S1 x R2 relaxed S3F grid sizes.",
+    )
+    sensitivity.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("results") / "particle_sensitivity",
+    )
+    sensitivity.add_argument("--grid-sizes", type=int, nargs="+", default=[8, 16, 32, 64])
+    sensitivity.add_argument("--particle-counts", type=int, nargs="+", default=[128, 256, 512, 1024, 2048, 4096, 8192])
+    sensitivity.add_argument("--trials", type=int, default=32)
+    sensitivity.add_argument("--steps", type=int, default=20)
+    sensitivity.add_argument("--seed", type=int, default=7)
+    sensitivity.add_argument("--particle-seed", type=int, default=101)
+    sensitivity.add_argument("--no-plots", action="store_true")
 
     euroc = subparsers.add_parser(
         "euroc-planar",

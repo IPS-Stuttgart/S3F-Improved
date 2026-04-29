@@ -81,6 +81,19 @@ manual GitHub Actions workflow `Baseline Comparison Benchmark`. It uploads the
 generated CSV, plots, metadata, and note as a workflow artifact attached to the
 Actions run.
 
+## Sweep Particle Counts
+
+To study the accuracy-runtime tradeoff between relaxed S3F grids and bootstrap
+particle-filter sample counts:
+
+```bash
+se3plusplus-s3f particle-sensitivity
+```
+
+This writes outputs to `results/particle_sensitivity/`. For a larger run that
+keeps generated files out of git, use the manual GitHub Actions workflow
+`Particle Sensitivity Benchmark`.
+
 ## Run a EuRoC Planar Smoke Test
 
 The EuRoC smoke path uses a single ground-truth trajectory file and projects it

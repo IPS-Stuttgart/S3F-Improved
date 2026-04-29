@@ -33,12 +33,19 @@ def write_metric_line_plots(
         ax.set_ylabel(ylabel)
         ax.grid(True, alpha=0.3)
         ax.legend()
-        fig.tight_layout()
-        path = output_dir / filename
-        fig.savefig(path, dpi=160)
-        plt.close(fig)
+        path = save_figure(fig, output_dir, filename)
         paths.append(path)
     return paths
+
+
+def save_figure(fig, output_dir: Path, filename: str) -> Path:
+    """Save a Matplotlib figure and close it."""
+
+    fig.tight_layout()
+    path = output_dir / filename
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return path
 
 
 def format_plot_list(plot_paths: list[Path]) -> str:
