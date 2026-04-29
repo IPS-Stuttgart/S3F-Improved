@@ -90,10 +90,10 @@ high-resolution S3F reference in one report:
 se3plusplus-s3f quality-cost
 ```
 
-This writes a metrics table, grid-saving claims table, plots, metadata, and a
-short note to `results/quality_cost/`. For a reproducible runner-side report
-without committing generated files, use the manual GitHub Actions workflow
-`Quality Cost Report`.
+This writes S3F metrics, grid-saving claims, a combined S3F-vs-particle Pareto
+table, plots, metadata, and a short note to `results/quality_cost/`. For a
+reproducible runner-side report without committing generated files, use the
+manual GitHub Actions workflow `Quality Cost Report`.
 
 ## Sweep Particle Counts
 

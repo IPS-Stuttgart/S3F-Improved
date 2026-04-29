@@ -18,6 +18,11 @@ on:
         required: true
         default: 256
         type: number
+      particle_counts:
+        description: Bootstrap particle-filter counts, separated by spaces.
+        required: true
+        default: "128 512 2048 8192"
+        type: string
       steps:
         description: Prediction/update steps in each trial.
         required: true
@@ -40,6 +45,7 @@ jobs:
 
     env:
       GRID_SIZES: ${{ inputs.grid_sizes }}
+      PARTICLE_COUNTS: ${{ inputs.particle_counts }}
       REFERENCE_GRID_SIZE: ${{ inputs.reference_grid_size }}
       TRIALS: ${{ inputs.trials }}
       STEPS: ${{ inputs.steps }}
@@ -73,11 +79,23 @@ jobs:
               exit 1
             fi
           done
+          read -r -a particle_counts <<< "$PARTICLE_COUNTS"
+          if [[ ${#particle_counts[@]} -eq 0 ]]; then
+            echo "At least one particle count is required." >&2
+            exit 1
+          fi
+          for value in "${particle_counts[@]}"; do
+            if ! [[ "$value" =~ ^[0-9]+$ ]] || [[ "$value" -le 0 ]]; then
+              echo "Particle counts must be positive integers: $PARTICLE_COUNTS" >&2
+              exit 1
+            fi
+          done
 
           python -m se3plusplus_s3f.cli \
             quality-cost \
             --grid-sizes "${grid_sizes[@]}" \
             --reference-grid-size "$REFERENCE_GRID_SIZE" \
+            --particle-counts "${particle_counts[@]}" \
             --trials "$TRIALS" \
             --steps "$STEPS" \
             --output-dir "$OUTPUT_DIR"
@@ -94,23 +112,29 @@ jobs:
           report_dir = Path(os.environ["OUTPUT_DIR"])
           metrics = report_dir / "quality_cost_metrics.csv"
           claims = report_dir / "quality_cost_claims.csv"
+          pareto = report_dir / "quality_cost_pareto.csv"
           metadata_file = report_dir / "run_metadata.json"
           note = report_dir / "quality_cost_note.md"
 
-          missing = [path for path in (metrics, claims, metadata_file, note) if not path.exists()]
+          missing = [path for path in (metrics, claims, pareto, metadata_file, note) if not path.exists()]
           if missing:
               raise FileNotFoundError(missing)
 
           metric_rows = list(csv.DictReader(metrics.open(newline="", encoding="utf-8")))
           claim_rows = list(csv.DictReader(claims.open(newline="", encoding="utf-8")))
+          pareto_rows = list(csv.DictReader(pareto.open(newline="", encoding="utf-8")))
           grid_count = len(os.environ["GRID_SIZES"].split())
+          particle_count = len(os.environ["PARTICLE_COUNTS"].split())
           expected_metric_rows = 3 * grid_count
           expected_claim_rows = grid_count + max(grid_count - 1, 0)
+          expected_pareto_rows = expected_metric_rows + particle_count
 
           if len(metric_rows) != expected_metric_rows:
               raise AssertionError((expected_metric_rows, len(metric_rows)))
           if len(claim_rows) != expected_claim_rows:
               raise AssertionError((expected_claim_rows, len(claim_rows)))
+          if len(pareto_rows) != expected_pareto_rows:
+              raise AssertionError((expected_pareto_rows, len(pareto_rows)))
 
           finite_columns = ("position_rmse", "mean_nees", "runtime_ms_per_step", "position_rmse_to_reference")
           for row in metric_rows:
@@ -120,11 +144,23 @@ jobs:
                   if not math.isfinite(float(row[column])):
                       raise AssertionError(row)
 
+          pareto_filters = {row["filter"] for row in pareto_rows}
+          if pareto_filters != {"s3f", "particle_filter"}:
+              raise AssertionError(pareto_filters)
+          for row in pareto_rows:
+              for column in ("position_rmse", "mean_nees", "coverage_95", "runtime_ms_per_step"):
+                  if not math.isfinite(float(row[column])):
+                      raise AssertionError(row)
+
           metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
-          if metadata["metrics_rows"] != len(metric_rows) or metadata["claims_rows"] != len(claim_rows):
+          if (
+              metadata["metrics_rows"] != len(metric_rows)
+              or metadata["claims_rows"] != len(claim_rows)
+              or metadata["pareto_rows"] != len(pareto_rows)
+          ):
               raise AssertionError(metadata)
 
-          print(f"Validated {len(metric_rows)} metrics rows and {len(claim_rows)} claim rows.")
+          print(f"Validated {len(metric_rows)} metrics rows, {len(claim_rows)} claim rows, and {len(pareto_rows)} pareto rows.")
           PY
 
       - name: Write report summary

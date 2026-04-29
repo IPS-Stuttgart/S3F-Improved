@@ -10,6 +10,7 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 
+from .baseline_comparison import ParticleSensitivityConfig, particle_sensitivity_config_to_dict, run_particle_sensitivity
 from .highres_reference import HighResReferenceConfig, highres_reference_config_to_dict, run_highres_reference_benchmark
 from .plotting import format_plot_list, save_figure
 from .relaxed_s3f_pilot import VARIANT_LABELS, PilotConfig
@@ -56,7 +57,34 @@ QUALITY_COST_CLAIM_FIELDNAMES = [
     "supports_runtime_claim",
 ]
 
+QUALITY_COST_PARETO_FIELDNAMES = [
+    "filter",
+    "label",
+    "variant",
+    "grid_size",
+    "particle_count",
+    "resource_count",
+    "position_rmse",
+    "mean_nees",
+    "coverage_95",
+    "runtime_ms_per_step",
+    "position_rmse_to_reference",
+    "runtime_ratio_to_reference",
+    "n_trials",
+    "n_steps",
+]
+
 QUALITY_COST_VARIANTS = ("baseline", "r1", "r1_r2")
+QUALITY_COST_PARTICLE_COUNTS = (128, 512, 2048, 8192)
+
+
+@dataclass(frozen=True)
+class QualityCostResult:
+    """Container for quality-cost report tables."""
+
+    metrics: list[dict[str, float | int | str]]
+    claims: list[dict[str, float | int | str | bool]]
+    pareto: list[dict[str, float | int | str]]
 
 
 @dataclass(frozen=True)
@@ -74,21 +102,28 @@ class QualityCostConfig:
             reference_grid_size=256,
         )
     )
+    particle_counts: tuple[int, ...] = QUALITY_COST_PARTICLE_COUNTS
+    particle_seed: int = 101
+    particle_resample_threshold: float = 0.5
 
 
 def quality_cost_config_to_dict(config: QualityCostConfig) -> dict[str, Any]:
     """Return a JSON-serializable quality-cost config."""
 
-    return {"reference": highres_reference_config_to_dict(config.reference)}
+    return {
+        "reference": highres_reference_config_to_dict(config.reference),
+        "particle_sensitivity": particle_sensitivity_config_to_dict(_particle_config(config)),
+    }
 
 
-def run_quality_cost_report(config: QualityCostConfig = QualityCostConfig()) -> tuple[list[dict[str, float | int | str]], list[dict[str, float | int | str | bool]]]:
+def run_quality_cost_report(config: QualityCostConfig = QualityCostConfig()) -> QualityCostResult:
     """Run the quality-vs-cost report from a high-resolution S3F reference sweep."""
 
     reference_rows = run_highres_reference_benchmark(config.reference)
     rows = [_quality_row_from_reference(row) for row in reference_rows]
     claims = _build_claim_rows(rows)
-    return rows, claims
+    pareto = _build_pareto_rows(rows, run_particle_sensitivity(_particle_config(config)))
+    return QualityCostResult(metrics=rows, claims=claims, pareto=pareto)
 
 
 def write_quality_cost_outputs(
@@ -100,26 +135,38 @@ def write_quality_cost_outputs(
 
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    rows, claims = run_quality_cost_report(config)
+    result = run_quality_cost_report(config)
 
     metrics_path = output_dir / "quality_cost_metrics.csv"
-    _write_csv(metrics_path, rows, QUALITY_COST_FIELDNAMES)
+    _write_csv(metrics_path, result.metrics, QUALITY_COST_FIELDNAMES)
 
     claims_path = output_dir / "quality_cost_claims.csv"
-    _write_csv(claims_path, claims, QUALITY_COST_CLAIM_FIELDNAMES)
+    _write_csv(claims_path, result.claims, QUALITY_COST_CLAIM_FIELDNAMES)
 
-    outputs = {"metrics": metrics_path, "claims": claims_path}
-    plot_paths = _write_plots(output_dir, rows) if write_plots else []
+    pareto_path = output_dir / "quality_cost_pareto.csv"
+    _write_csv(pareto_path, result.pareto, QUALITY_COST_PARETO_FIELDNAMES)
+
+    outputs = {"metrics": metrics_path, "claims": claims_path, "pareto": pareto_path}
+    plot_paths = _write_plots(output_dir, result.metrics, result.pareto) if write_plots else []
     outputs.update({plot_path.stem: plot_path for plot_path in plot_paths})
 
     note_path = output_dir / "quality_cost_note.md"
-    _write_note(note_path, rows, claims, metrics_path, claims_path, plot_paths, config)
+    _write_note(note_path, result, metrics_path, claims_path, pareto_path, plot_paths, config)
     outputs["note"] = note_path
 
     metadata_path = output_dir / "run_metadata.json"
-    _write_metadata(metadata_path, rows, claims, config)
+    _write_metadata(metadata_path, result, config)
     outputs["metadata"] = metadata_path
     return outputs
+
+
+def _particle_config(config: QualityCostConfig) -> ParticleSensitivityConfig:
+    return ParticleSensitivityConfig(
+        pilot=config.reference.pilot,
+        particle_counts=config.particle_counts,
+        particle_seed=config.particle_seed,
+        particle_resample_threshold=config.particle_resample_threshold,
+    )
 
 
 def _quality_row_from_reference(row: dict[str, float | int | str]) -> dict[str, float | int | str]:
@@ -207,6 +254,58 @@ def _distance_to_consistent_nees(value: float | int | str) -> float:
     return abs(float(value) - 2.0)
 
 
+def _build_pareto_rows(
+    s3f_rows: list[dict[str, float | int | str]],
+    particle_sensitivity_rows: list[dict[str, float | int | str]],
+) -> list[dict[str, float | int | str]]:
+    pareto_rows = [_pareto_row_from_s3f(row) for row in s3f_rows]
+    pareto_rows.extend(
+        _pareto_row_from_particle(row)
+        for row in particle_sensitivity_rows
+        if row["filter"] == "particle_filter"
+    )
+    return pareto_rows
+
+
+def _pareto_row_from_s3f(row: dict[str, float | int | str]) -> dict[str, float | int | str]:
+    return {
+        "filter": "s3f",
+        "label": _row_label(row),
+        "variant": row["variant"],
+        "grid_size": row["grid_size"],
+        "particle_count": "",
+        "resource_count": row["grid_size"],
+        "position_rmse": row["position_rmse"],
+        "mean_nees": row["mean_nees"],
+        "coverage_95": row["coverage_95"],
+        "runtime_ms_per_step": row["runtime_ms_per_step"],
+        "position_rmse_to_reference": row["position_rmse_to_reference"],
+        "runtime_ratio_to_reference": row["runtime_ratio_to_reference"],
+        "n_trials": row["n_trials"],
+        "n_steps": row["n_steps"],
+    }
+
+
+def _pareto_row_from_particle(row: dict[str, float | int | str]) -> dict[str, float | int | str]:
+    particle_count = row["particle_count"]
+    return {
+        "filter": "particle_filter",
+        "label": f"Particle filter ({particle_count})",
+        "variant": row["variant"],
+        "grid_size": "",
+        "particle_count": particle_count,
+        "resource_count": particle_count,
+        "position_rmse": row["position_rmse"],
+        "mean_nees": row["mean_nees"],
+        "coverage_95": row["coverage_95"],
+        "runtime_ms_per_step": row["runtime_ms_per_step"],
+        "position_rmse_to_reference": "",
+        "runtime_ratio_to_reference": "",
+        "n_trials": row["n_trials"],
+        "n_steps": row["n_steps"],
+    }
+
+
 def _write_csv(path: Path, rows: list[dict[str, float | int | str | bool]], fieldnames: list[str]) -> None:
     with path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
@@ -216,28 +315,32 @@ def _write_csv(path: Path, rows: list[dict[str, float | int | str | bool]], fiel
 
 def _write_metadata(
     path: Path,
-    rows: list[dict[str, float | int | str]],
-    claims: list[dict[str, float | int | str | bool]],
+    result: QualityCostResult,
     config: QualityCostConfig,
 ) -> None:
     metadata = {
         "experiment": "quality_cost",
         "config": quality_cost_config_to_dict(config),
         "metrics_schema": QUALITY_COST_FIELDNAMES,
-        "metrics_rows": len(rows),
+        "metrics_rows": len(result.metrics),
         "claims_schema": QUALITY_COST_CLAIM_FIELDNAMES,
-        "claims_rows": len(claims),
+        "claims_rows": len(result.claims),
+        "pareto_schema": QUALITY_COST_PARETO_FIELDNAMES,
+        "pareto_rows": len(result.pareto),
     }
     path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _write_plots(output_dir: Path, rows: list[dict[str, float | int | str]]) -> list[Path]:
+def _write_plots(output_dir: Path, rows: list[dict[str, float | int | str]], pareto_rows: list[dict[str, float | int | str]]) -> list[Path]:
     specs = [
         ("position_rmse", "Translation RMSE", "quality_cost_rmse_runtime.png"),
         ("mean_nees", "Mean Position NEES", "quality_cost_nees_runtime.png"),
         ("position_rmse_to_reference", "Translation RMSE to Reference", "quality_cost_reference_rmse_runtime.png"),
     ]
-    return [_write_runtime_tradeoff_plot(output_dir, rows, metric, ylabel, filename) for metric, ylabel, filename in specs]
+    plots = [_write_runtime_tradeoff_plot(output_dir, rows, metric, ylabel, filename) for metric, ylabel, filename in specs]
+    plots.append(_write_pareto_plot(output_dir, pareto_rows, "position_rmse", "Translation RMSE", "quality_cost_pareto_rmse_runtime.png"))
+    plots.append(_write_pareto_plot(output_dir, pareto_rows, "mean_nees", "Mean Position NEES", "quality_cost_pareto_nees_runtime.png"))
+    return plots
 
 
 def _write_runtime_tradeoff_plot(output_dir: Path, rows: list[dict[str, float | int | str]], metric: str, ylabel: str, filename: str) -> Path:
@@ -260,20 +363,61 @@ def _write_runtime_tradeoff_plot(output_dir: Path, rows: list[dict[str, float | 
     return save_figure(fig, output_dir, filename)
 
 
+def _write_pareto_plot(output_dir: Path, rows: list[dict[str, float | int | str]], metric: str, ylabel: str, filename: str) -> Path:
+    fig, ax = plt.subplots(figsize=(8.2, 5.0))
+    for variant in QUALITY_COST_VARIANTS:
+        variant_rows = sorted(
+            [row for row in rows if row["filter"] == "s3f" and row["variant"] == variant],
+            key=lambda row: int(row["grid_size"]),
+        )
+        ax.plot(
+            [float(row["runtime_ms_per_step"]) for row in variant_rows],
+            [float(row[metric]) for row in variant_rows],
+            marker="o",
+            linewidth=1.8,
+            label=VARIANT_LABELS[variant],
+        )
+
+    particle_rows = sorted(
+        [row for row in rows if row["filter"] == "particle_filter"],
+        key=lambda row: int(row["particle_count"]),
+    )
+    if particle_rows:
+        ax.plot(
+            [float(row["runtime_ms_per_step"]) for row in particle_rows],
+            [float(row[metric]) for row in particle_rows],
+            marker="s",
+            linewidth=1.8,
+            label="Particle filter",
+        )
+
+    ax.set_xlabel("Runtime [ms/step]")
+    ax.set_ylabel(ylabel)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    return save_figure(fig, output_dir, filename)
+
+
 def _write_note(
     path: Path,
-    rows: list[dict[str, float | int | str]],
-    claims: list[dict[str, float | int | str | bool]],
+    result: QualityCostResult,
     metrics_path: Path,
     claims_path: Path,
+    pareto_path: Path,
     plot_paths: list[Path],
     config: QualityCostConfig,
 ) -> None:
-    best_accuracy = min(rows, key=lambda row: float(row["position_rmse"]))
+    rows = result.metrics
+    best_accuracy = min(result.pareto, key=lambda row: float(row["position_rmse"]))
     best_reference_match = min(rows, key=lambda row: float(row["position_rmse_to_reference"]))
+    best_particle = _best_filter_row(result.pareto, "particle_filter")
+    best_r1_r2 = min(
+        [row for row in result.pareto if row["filter"] == "s3f" and row["variant"] == "r1_r2"],
+        key=lambda row: float(row["position_rmse"]),
+    )
     supported_grid_saving = [
         claim
-        for claim in claims
+        for claim in result.claims
         if str(claim["claim_id"]).startswith("coarser_r1_r2")
         and bool(claim["supports_accuracy_claim"])
         and bool(claim["supports_runtime_claim"])
@@ -288,14 +432,16 @@ def _write_note(
         f"Steps per trial: {config.reference.pilot.n_steps}",
         f"Grid sizes: {list(config.reference.pilot.grid_sizes)}",
         f"Reference grid size: {config.reference.reference_grid_size}",
+        f"Particle counts: {list(config.particle_counts)}",
         f"Metrics file: `{metrics_path.name}`",
         f"Claims file: `{claims_path.name}`",
+        f"Pareto file: `{pareto_path.name}`",
         "",
         "## Best Rows",
         "",
         (
             "Best truth RMSE: "
-            f"`{_row_label(best_accuracy)}` with RMSE `{float(best_accuracy['position_rmse']):.4f}`, "
+            f"`{best_accuracy['label']}` with RMSE `{float(best_accuracy['position_rmse']):.4f}`, "
             f"NEES `{float(best_accuracy['mean_nees']):.3f}`, and runtime "
             f"`{float(best_accuracy['runtime_ms_per_step']):.3f}` ms/step."
         ),
@@ -311,18 +457,22 @@ def _write_note(
         "",
         "## Grid-Saving Checks",
         "",
-        _format_claims_table(claims),
+        _format_claims_table(result.claims),
+        "",
+        "## S3F-vs-Particle Pareto Table",
+        "",
+        _format_pareto_table(result.pareto),
         "",
         "## Interpretation",
         "",
         _interpret_supported_claims(supported_grid_saving),
+        _interpret_particle_comparison(best_r1_r2, best_particle),
         "",
         "Plots:",
         format_plot_list(plot_paths),
         "",
-        "This report is still an S3F-internal comparison. It answers whether relaxed",
-        "coarse grids approach the high-resolution S3F behavior sooner; it does not",
-        "replace the particle-filter sensitivity benchmark.",
+        "The S3F-to-reference columns remain S3F-internal. The Pareto table is the",
+        "shared truth-metric comparison against the bootstrap particle filter.",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -375,6 +525,23 @@ def _format_claims_table(claims: list[dict[str, float | int | str | bool]]) -> s
     return "\n".join([header, separator, *body])
 
 
+def _format_pareto_table(rows: list[dict[str, float | int | str]]) -> str:
+    header = "| Method | Resource | RMSE | NEES | Coverage | Runtime ms/step |"
+    separator = "|---|---:|---:|---:|---:|---:|"
+    body = []
+    for row in sorted(rows, key=lambda item: (str(item["filter"]), float(item["runtime_ms_per_step"]))):
+        body.append(
+            "| "
+            f"{row['label']} | "
+            f"{int(row['resource_count'])} | "
+            f"{float(row['position_rmse']):.4f} | "
+            f"{float(row['mean_nees']):.3f} | "
+            f"{float(row['coverage_95']):.3f} | "
+            f"{float(row['runtime_ms_per_step']):.3f} |"
+        )
+    return "\n".join([header, separator, *body])
+
+
 def _interpret_supported_claims(claims: list[dict[str, float | int | str | bool]]) -> str:
     if not claims:
         return "No coarser-grid R1+R2 row met both the accuracy and runtime checks against the next baseline grid size."
@@ -385,3 +552,28 @@ def _interpret_supported_claims(claims: list[dict[str, float | int | str | bool]
             f"`{claim['comparator_grid_size']}` cells on RMSE without being more than 10% slower."
         )
     return " ".join(claim_text)
+
+
+def _best_filter_row(rows: list[dict[str, float | int | str]], filter_name: str) -> dict[str, float | int | str] | None:
+    matching_rows = [row for row in rows if row["filter"] == filter_name]
+    if not matching_rows:
+        return None
+    return min(matching_rows, key=lambda row: float(row["position_rmse"]))
+
+
+def _interpret_particle_comparison(
+    best_r1_r2: dict[str, float | int | str],
+    best_particle: dict[str, float | int | str] | None,
+) -> str:
+    if best_particle is None:
+        return "No particle-filter rows were included in this report."
+
+    rmse_ratio = _ratio(best_r1_r2["position_rmse"], best_particle["position_rmse"])
+    runtime_ratio = _ratio(best_r1_r2["runtime_ms_per_step"], best_particle["runtime_ms_per_step"])
+    return (
+        f"Best `R1+R2` uses `{best_r1_r2['resource_count']}` cells with RMSE "
+        f"`{float(best_r1_r2['position_rmse']):.4f}` at `{float(best_r1_r2['runtime_ms_per_step']):.3f}` ms/step; "
+        f"best particle row uses `{best_particle['particle_count']}` particles with RMSE "
+        f"`{float(best_particle['position_rmse']):.4f}` at `{float(best_particle['runtime_ms_per_step']):.3f}` ms/step. "
+        f"The R1+R2/best-particle ratios are `{rmse_ratio:.3f}` for RMSE and `{runtime_ratio:.3f}` for runtime."
+    )

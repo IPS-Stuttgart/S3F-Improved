@@ -89,7 +89,9 @@ def main() -> None:
                     seed=args.seed,
                 ),
                 reference_grid_size=args.reference_grid_size,
-            )
+            ),
+            particle_counts=tuple(args.particle_counts),
+            particle_seed=args.particle_seed,
         )
         outputs = write_quality_cost_outputs(
             output_dir=args.output_dir,
@@ -230,6 +232,8 @@ def _parse_args() -> argparse.Namespace:
     quality_cost.add_argument("--trials", type=int, default=16)
     quality_cost.add_argument("--steps", type=int, default=16)
     quality_cost.add_argument("--seed", type=int, default=17)
+    quality_cost.add_argument("--particle-counts", type=int, nargs="+", default=[128, 512, 2048, 8192])
+    quality_cost.add_argument("--particle-seed", type=int, default=101)
     quality_cost.add_argument("--no-plots", action="store_true")
 
     sensitivity = subparsers.add_parser(

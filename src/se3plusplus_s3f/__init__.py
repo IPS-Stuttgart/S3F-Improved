@@ -4,7 +4,7 @@ from .s1r2.baseline_comparison import BaselineComparisonConfig, ParticleSensitiv
 from .s1r2.relaxed_s3f_pilot import PilotConfig, load_pilot_config, run_relaxed_s3f_pilot
 from .s1r2.euroc_planar import EuRoCPlanarConfig, run_euroc_planar_relaxed_s3f
 from .s1r2.highres_reference import HighResReferenceConfig, run_highres_reference_benchmark
-from .s1r2.quality_cost import QualityCostConfig, run_quality_cost_report
+from .s1r2.quality_cost import QualityCostConfig, QualityCostResult, run_quality_cost_report
 from .s1r2.runtime_profile import RuntimeProfileConfig, run_s3f_runtime_profile
 
 __all__ = [
@@ -14,6 +14,7 @@ __all__ = [
     "ParticleSensitivityConfig",
     "PilotConfig",
     "QualityCostConfig",
+    "QualityCostResult",
     "RuntimeProfileConfig",
     "load_pilot_config",
     "run_baseline_comparison",
