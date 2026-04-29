@@ -463,10 +463,15 @@ def _write_note(
         "",
         _format_pareto_table(result.pareto),
         "",
+        "## RMSE-Runtime Frontier",
+        "",
+        _format_pareto_table(_rmse_runtime_frontier(result.pareto)),
+        "",
         "## Interpretation",
         "",
         _interpret_supported_claims(supported_grid_saving),
         _interpret_particle_comparison(best_r1_r2, best_particle),
+        _interpret_nearest_particle_comparison(best_r1_r2, result.pareto),
         "",
         "Plots:",
         format_plot_list(plot_paths),
@@ -529,7 +534,7 @@ def _format_pareto_table(rows: list[dict[str, float | int | str]]) -> str:
     header = "| Method | Resource | RMSE | NEES | Coverage | Runtime ms/step |"
     separator = "|---|---:|---:|---:|---:|---:|"
     body = []
-    for row in sorted(rows, key=lambda item: (str(item["filter"]), float(item["runtime_ms_per_step"]))):
+    for row in sorted(rows, key=lambda item: (float(item["runtime_ms_per_step"]), str(item["filter"]))):
         body.append(
             "| "
             f"{row['label']} | "
@@ -540,6 +545,31 @@ def _format_pareto_table(rows: list[dict[str, float | int | str]]) -> str:
             f"{float(row['runtime_ms_per_step']):.3f} |"
         )
     return "\n".join([header, separator, *body])
+
+
+def _rmse_runtime_frontier(rows: list[dict[str, float | int | str]]) -> list[dict[str, float | int | str]]:
+    """Return rows not dominated on truth RMSE and runtime."""
+
+    frontier = []
+    for candidate in rows:
+        if not any(_dominates(other, candidate) for other in rows if other is not candidate):
+            frontier.append(candidate)
+    return sorted(frontier, key=lambda row: (float(row["runtime_ms_per_step"]), float(row["position_rmse"])))
+
+
+def _dominates(
+    candidate: dict[str, float | int | str],
+    comparator: dict[str, float | int | str],
+) -> bool:
+    candidate_rmse = float(candidate["position_rmse"])
+    comparator_rmse = float(comparator["position_rmse"])
+    candidate_runtime = float(candidate["runtime_ms_per_step"])
+    comparator_runtime = float(comparator["runtime_ms_per_step"])
+    return (
+        candidate_rmse <= comparator_rmse
+        and candidate_runtime <= comparator_runtime
+        and (candidate_rmse < comparator_rmse or candidate_runtime < comparator_runtime)
+    )
 
 
 def _interpret_supported_claims(claims: list[dict[str, float | int | str | bool]]) -> str:
@@ -577,3 +607,48 @@ def _interpret_particle_comparison(
         f"`{float(best_particle['position_rmse']):.4f}` at `{float(best_particle['runtime_ms_per_step']):.3f}` ms/step. "
         f"The R1+R2/best-particle ratios are `{rmse_ratio:.3f}` for RMSE and `{runtime_ratio:.3f}` for runtime."
     )
+
+
+def _interpret_nearest_particle_comparison(
+    best_r1_r2: dict[str, float | int | str],
+    rows: list[dict[str, float | int | str]],
+) -> str:
+    particle_rows = [row for row in rows if row["filter"] == "particle_filter"]
+    if not particle_rows:
+        return "No particle-filter row is available for same-runtime comparison."
+
+    nearest_runtime_particle = min(
+        particle_rows,
+        key=lambda row: abs(float(row["runtime_ms_per_step"]) - float(best_r1_r2["runtime_ms_per_step"])),
+    )
+    not_slower_particles = [
+        row
+        for row in particle_rows
+        if float(row["runtime_ms_per_step"]) <= float(best_r1_r2["runtime_ms_per_step"])
+    ]
+    best_not_slower_particle = (
+        min(not_slower_particles, key=lambda row: float(row["position_rmse"]))
+        if not_slower_particles
+        else None
+    )
+
+    nearest_text = (
+        f"Nearest-runtime particle row: `{nearest_runtime_particle['label']}` has RMSE "
+        f"`{float(nearest_runtime_particle['position_rmse']):.4f}` at "
+        f"`{float(nearest_runtime_particle['runtime_ms_per_step']):.3f}` ms/step."
+    )
+    if best_not_slower_particle is None:
+        return nearest_text + " No particle row is at least as fast as the best R1+R2 row."
+
+    comparison_text = (
+        f"Best particle row no slower than best R1+R2: `{best_not_slower_particle['label']}` "
+        f"with RMSE `{float(best_not_slower_particle['position_rmse']):.4f}` at "
+        f"`{float(best_not_slower_particle['runtime_ms_per_step']):.3f}` ms/step."
+    )
+    if _dominates(best_not_slower_particle, best_r1_r2):
+        comparison_text += " In this run it dominates the best R1+R2 row on RMSE and runtime."
+    else:
+        comparison_text += (
+            " In this run it is faster, but does not dominate the best R1+R2 row on RMSE."
+        )
+    return nearest_text + " " + comparison_text
