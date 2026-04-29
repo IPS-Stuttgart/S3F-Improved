@@ -94,6 +94,18 @@ This writes outputs to `results/particle_sensitivity/`. For a larger run that
 keeps generated files out of git, use the manual GitHub Actions workflow
 `Particle Sensitivity Benchmark`.
 
+## Profile S3F Runtime
+
+To split relaxed S3F runtime into likelihood construction, cell-statistics,
+`predict_linear`, update, and metric-bookkeeping phases:
+
+```bash
+se3plusplus-s3f profile-s3f-runtime
+```
+
+This writes outputs to `results/s3f_runtime_profile/`. For a reproducible CI
+runner profile, use the manual GitHub Actions workflow `S3F Runtime Profile`.
+
 ## Run a EuRoC Planar Smoke Test
 
 The EuRoC smoke path uses a single ground-truth trajectory file and projects it

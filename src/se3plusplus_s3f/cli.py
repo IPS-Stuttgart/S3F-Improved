@@ -15,6 +15,7 @@ from .s1r2.baseline_comparison import (
 from .s1r2.euroc_planar import EuRoCPlanarConfig, write_euroc_planar_outputs
 from .s1r2.highres_reference import HighResReferenceConfig, write_highres_reference_outputs
 from .s1r2.relaxed_s3f_pilot import PilotConfig, load_pilot_config, write_relaxed_s3f_pilot_outputs
+from .s1r2.runtime_profile import RuntimeProfileConfig, write_s3f_runtime_profile_outputs
 
 
 def main() -> None:
@@ -88,6 +89,25 @@ def main() -> None:
             particle_seed=args.particle_seed,
         )
         outputs = write_particle_sensitivity_outputs(
+            output_dir=args.output_dir,
+            config=config,
+            write_plots=not args.no_plots,
+        )
+        for label, path in outputs.items():
+            print(f"Wrote {label}: {path}")
+        return
+
+    if args.command == "profile-s3f-runtime":
+        config = RuntimeProfileConfig(
+            pilot=PilotConfig(
+                grid_sizes=tuple(args.grid_sizes),
+                variants=tuple(args.variants),
+                n_trials=args.trials,
+                n_steps=args.steps,
+                seed=args.seed,
+            )
+        )
+        outputs = write_s3f_runtime_profile_outputs(
             output_dir=args.output_dir,
             config=config,
             write_plots=not args.no_plots,
@@ -189,6 +209,22 @@ def _parse_args() -> argparse.Namespace:
     sensitivity.add_argument("--seed", type=int, default=7)
     sensitivity.add_argument("--particle-seed", type=int, default=101)
     sensitivity.add_argument("--no-plots", action="store_true")
+
+    profile = subparsers.add_parser(
+        "profile-s3f-runtime",
+        help="Profile relaxed S3F prediction and update runtime phases.",
+    )
+    profile.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("results") / "s3f_runtime_profile",
+    )
+    profile.add_argument("--grid-sizes", type=int, nargs="+", default=[8, 16, 32, 64])
+    profile.add_argument("--variants", nargs="+", default=["baseline", "r1", "r1_r2"])
+    profile.add_argument("--trials", type=int, default=16)
+    profile.add_argument("--steps", type=int, default=16)
+    profile.add_argument("--seed", type=int, default=7)
+    profile.add_argument("--no-plots", action="store_true")
 
     euroc = subparsers.add_parser(
         "euroc-planar",

@@ -1,0 +1,159 @@
+name: S3F Runtime Profile
+
+on:
+  workflow_dispatch:
+    inputs:
+      grid_sizes:
+        description: Circular grid sizes to profile, separated by spaces.
+        required: true
+        default: "8 16 32 64"
+        type: string
+      variants:
+        description: S3F variants to include, separated by spaces.
+        required: true
+        default: "baseline r1 r1_r2"
+        type: string
+      trials:
+        description: Synthetic runs to average for each profile row.
+        required: true
+        default: 64
+        type: number
+      steps:
+        description: Prediction/update steps in each synthetic run.
+        required: true
+        default: 30
+        type: number
+      retention_days:
+        description: Artifact retention period in days.
+        required: true
+        default: 30
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  s3f-runtime-profile:
+    name: Profile S3F runtime phases
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      GRID_SIZES: ${{ inputs.grid_sizes }}
+      VARIANTS: ${{ inputs.variants }}
+      TRIALS: ${{ inputs.trials }}
+      STEPS: ${{ inputs.steps }}
+      OUTPUT_DIR: results/s3f_runtime_profile
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run S3F runtime profile
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+
+          grid_sizes = os.environ["GRID_SIZES"].split()
+          variants = os.environ["VARIANTS"].split()
+          if not grid_sizes or any(not value.isdigit() or int(value) <= 0 for value in grid_sizes):
+              raise ValueError(f"Grid sizes must be positive integers: {grid_sizes}")
+          if not variants:
+              raise ValueError("At least one variant is required.")
+
+          trials = int(os.environ["TRIALS"])
+          steps = int(os.environ["STEPS"])
+          if min(trials, steps) <= 0:
+              raise ValueError("trials and steps must be positive.")
+
+          command = [
+              sys.executable,
+              "-m",
+              "se3plusplus_s3f.cli",
+              "profile-s3f-runtime",
+              "--grid-sizes",
+              *grid_sizes,
+              "--variants",
+              *variants,
+              "--trials",
+              str(trials),
+              "--steps",
+              str(steps),
+              "--output-dir",
+              os.environ["OUTPUT_DIR"],
+          ]
+          subprocess.run(command, check=True)
+          PY
+
+      - name: Validate profile outputs
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          import math
+          import os
+          from pathlib import Path
+
+          output_dir = Path(os.environ["OUTPUT_DIR"])
+          metrics_path = output_dir / "s3f_runtime_profile.csv"
+          metadata_path = output_dir / "run_metadata.json"
+          note_path = output_dir / "s3f_runtime_profile_note.md"
+
+          for required_path in (metrics_path, metadata_path, note_path):
+              if not required_path.exists():
+                  raise FileNotFoundError(required_path)
+
+          rows = list(csv.DictReader(metrics_path.open(newline="", encoding="utf-8")))
+          expected_rows = len(os.environ["GRID_SIZES"].split()) * len(os.environ["VARIANTS"].split())
+          if len(rows) != expected_rows:
+              raise AssertionError(f"Expected {expected_rows} rows, found {len(rows)}.")
+
+          for row_index, row in enumerate(rows):
+              required_values = {
+                  "total_wall_ms_per_step": float(row["total_wall_ms_per_step"]),
+                  "cell_stats_ms_per_step": float(row["cell_stats_ms_per_step"]),
+                  "predict_linear_ms_per_step": float(row["predict_linear_ms_per_step"]),
+                  "update_ms_per_step": float(row["update_ms_per_step"]),
+              }
+              if not all(math.isfinite(value) for value in required_values.values()):
+                  raise AssertionError((row_index, row))
+              if required_values["total_wall_ms_per_step"] <= 0.0:
+                  raise AssertionError((row_index, row))
+
+          metadata_rows = json.loads(metadata_path.read_text(encoding="utf-8"))["metrics_rows"]
+          if metadata_rows != len(rows):
+              raise AssertionError((metadata_rows, len(rows)))
+
+          print(f"Validated {len(rows)} runtime profile rows in {metrics_path}.")
+          PY
+
+      - name: Write profile summary
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          note = Path(os.environ["OUTPUT_DIR"]) / "s3f_runtime_profile_note.md"
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          summary.write_text(note.read_text(encoding="utf-8"), encoding="utf-8")
+          PY
+
+      - name: Upload runtime profile artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3f-runtime-profile-${{ github.run_number }}
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
