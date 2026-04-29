@@ -1,0 +1,158 @@
+name: Baseline Comparison Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      grid_sizes:
+        description: Space-separated S3F grid sizes.
+        required: true
+        default: "8 16 32 64"
+        type: string
+      trials:
+        description: Number of synthetic trials.
+        required: true
+        default: 64
+        type: number
+      steps:
+        description: Number of prediction/update steps per trial.
+        required: true
+        default: 30
+        type: number
+      particle_count:
+        description: Number of bootstrap particle-filter particles.
+        required: true
+        default: 4096
+        type: number
+      retention_days:
+        description: Number of days to retain the uploaded Actions artifact.
+        required: true
+        default: 30
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  baseline-comparison:
+    name: Run baseline comparison benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      GRID_SIZES: ${{ inputs.grid_sizes }}
+      TRIALS: ${{ inputs.trials }}
+      STEPS: ${{ inputs.steps }}
+      PARTICLE_COUNT: ${{ inputs.particle_count }}
+      OUTPUT_DIR: results/baseline_comparison
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run baseline comparison benchmark
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+
+          grid_sizes = os.environ["GRID_SIZES"].split()
+          if not grid_sizes:
+              raise ValueError("At least one grid size is required.")
+          if any(not value.isdigit() or int(value) <= 0 for value in grid_sizes):
+              raise ValueError(f"Grid sizes must be positive integers: {grid_sizes}")
+
+          trials = int(os.environ["TRIALS"])
+          steps = int(os.environ["STEPS"])
+          particle_count = int(os.environ["PARTICLE_COUNT"])
+          if min(trials, steps, particle_count) <= 0:
+              raise ValueError("trials, steps, and particle_count must be positive.")
+
+          command = [
+              sys.executable,
+              "-m",
+              "se3plusplus_s3f.cli",
+              "compare-baselines",
+              "--grid-sizes",
+              *grid_sizes,
+              "--trials",
+              str(trials),
+              "--steps",
+              str(steps),
+              "--particle-count",
+              str(particle_count),
+              "--output-dir",
+              os.environ["OUTPUT_DIR"],
+          ]
+          subprocess.run(command, check=True)
+          PY
+
+      - name: Validate benchmark outputs
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          import math
+          import os
+          from pathlib import Path
+
+          output_dir = Path(os.environ["OUTPUT_DIR"])
+          metrics_path = output_dir / "baseline_comparison_metrics.csv"
+          metadata_path = output_dir / "run_metadata.json"
+          note_path = output_dir / "baseline_comparison_note.md"
+
+          for required_path in (metrics_path, metadata_path, note_path):
+              if not required_path.exists():
+                  raise FileNotFoundError(required_path)
+
+          rows = list(csv.DictReader(metrics_path.open(newline="", encoding="utf-8")))
+          grid_sizes = os.environ["GRID_SIZES"].split()
+          expected_rows = 3 * len(grid_sizes) + 2
+          if len(rows) != expected_rows:
+              raise AssertionError(f"Expected {expected_rows} rows, found {len(rows)}.")
+
+          filters = {row["filter"] for row in rows}
+          if filters != {"s3f", "ekf", "particle_filter"}:
+              raise AssertionError(filters)
+
+          for row in rows:
+              assert math.isfinite(float(row["position_rmse"])), row
+              assert math.isfinite(float(row["orientation_mean_error_rad"])), row
+              assert 0.0 <= float(row["coverage_95"]) <= 1.0, row
+              assert float(row["runtime_ms_per_step"]) > 0.0, row
+
+          metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+          if metadata["metrics_rows"] != len(rows):
+              raise AssertionError(metadata)
+
+          print(f"Validated {len(rows)} benchmark rows in {metrics_path}.")
+          PY
+
+      - name: Write benchmark summary
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          note = Path(os.environ["OUTPUT_DIR"]) / "baseline_comparison_note.md"
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          summary.write_text(note.read_text(encoding="utf-8"), encoding="utf-8")
+          PY
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-comparison-results-${{ github.run_number }}
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}

@@ -76,6 +76,11 @@ se3plusplus-s3f compare-baselines
 This writes a metrics CSV, plots, metadata, and a short note to
 `results/baseline_comparison/`.
 
+For a larger reproducible run without committing generated files, use the
+manual GitHub Actions workflow `Baseline Comparison Benchmark`. It uploads the
+generated CSV, plots, metadata, and note as a workflow artifact attached to the
+Actions run.
+
 ## Run a EuRoC Planar Smoke Test
 
 The EuRoC smoke path uses a single ground-truth trajectory file and projects it
