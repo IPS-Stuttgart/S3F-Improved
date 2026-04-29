@@ -1,0 +1,146 @@
+name: Quality Cost Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      trials:
+        description: Synthetic trials used for each quality-cost row.
+        required: true
+        default: 32
+        type: number
+      grid_sizes:
+        description: S3F circular cell counts, separated by spaces.
+        required: true
+        default: "8 16 32 64"
+        type: string
+      reference_grid_size:
+        description: High-resolution baseline cell count.
+        required: true
+        default: 256
+        type: number
+      steps:
+        description: Prediction/update steps in each trial.
+        required: true
+        default: 20
+        type: number
+      retention_days:
+        description: Days to retain the uploaded report artifact.
+        required: true
+        default: 30
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  quality-cost:
+    name: Build quality-cost report
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      GRID_SIZES: ${{ inputs.grid_sizes }}
+      REFERENCE_GRID_SIZE: ${{ inputs.reference_grid_size }}
+      TRIALS: ${{ inputs.trials }}
+      STEPS: ${{ inputs.steps }}
+      OUTPUT_DIR: results/quality_cost
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run quality-cost report
+        shell: bash
+        run: |
+          read -r -a grid_sizes <<< "$GRID_SIZES"
+          if [[ ${#grid_sizes[@]} -eq 0 ]]; then
+            echo "At least one grid size is required." >&2
+            exit 1
+          fi
+          for value in "${grid_sizes[@]}"; do
+            if ! [[ "$value" =~ ^[0-9]+$ ]] || [[ "$value" -le 0 ]]; then
+              echo "Grid sizes must be positive integers: $GRID_SIZES" >&2
+              exit 1
+            fi
+          done
+
+          python -m se3plusplus_s3f.cli \
+            quality-cost \
+            --grid-sizes "${grid_sizes[@]}" \
+            --reference-grid-size "$REFERENCE_GRID_SIZE" \
+            --trials "$TRIALS" \
+            --steps "$STEPS" \
+            --output-dir "$OUTPUT_DIR"
+
+      - name: Validate report artifact contents
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          import math
+          import os
+          from pathlib import Path
+
+          report_dir = Path(os.environ["OUTPUT_DIR"])
+          metrics = report_dir / "quality_cost_metrics.csv"
+          claims = report_dir / "quality_cost_claims.csv"
+          metadata_file = report_dir / "run_metadata.json"
+          note = report_dir / "quality_cost_note.md"
+
+          missing = [path for path in (metrics, claims, metadata_file, note) if not path.exists()]
+          if missing:
+              raise FileNotFoundError(missing)
+
+          metric_rows = list(csv.DictReader(metrics.open(newline="", encoding="utf-8")))
+          claim_rows = list(csv.DictReader(claims.open(newline="", encoding="utf-8")))
+          grid_count = len(os.environ["GRID_SIZES"].split())
+          expected_metric_rows = 3 * grid_count
+          expected_claim_rows = grid_count + max(grid_count - 1, 0)
+
+          if len(metric_rows) != expected_metric_rows:
+              raise AssertionError((expected_metric_rows, len(metric_rows)))
+          if len(claim_rows) != expected_claim_rows:
+              raise AssertionError((expected_claim_rows, len(claim_rows)))
+
+          finite_columns = ("position_rmse", "mean_nees", "runtime_ms_per_step", "position_rmse_to_reference")
+          for row in metric_rows:
+              if row["variant"] not in {"baseline", "r1", "r1_r2"}:
+                  raise AssertionError(row)
+              for column in finite_columns:
+                  if not math.isfinite(float(row[column])):
+                      raise AssertionError(row)
+
+          metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+          if metadata["metrics_rows"] != len(metric_rows) or metadata["claims_rows"] != len(claim_rows):
+              raise AssertionError(metadata)
+
+          print(f"Validated {len(metric_rows)} metrics rows and {len(claim_rows)} claim rows.")
+          PY
+
+      - name: Write report summary
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          report_note = Path(os.environ["OUTPUT_DIR"]) / "quality_cost_note.md"
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(report_note.read_text(encoding="utf-8"), encoding="utf-8")
+          PY
+
+      - name: Upload quality-cost artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: quality-cost-report-${{ github.run_number }}
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}

@@ -14,6 +14,7 @@ from .s1r2.baseline_comparison import (
 )
 from .s1r2.euroc_planar import EuRoCPlanarConfig, write_euroc_planar_outputs
 from .s1r2.highres_reference import HighResReferenceConfig, write_highres_reference_outputs
+from .s1r2.quality_cost import QUALITY_COST_VARIANTS, QualityCostConfig, write_quality_cost_outputs
 from .s1r2.relaxed_s3f_pilot import PilotConfig, load_pilot_config, write_relaxed_s3f_pilot_outputs
 from .s1r2.runtime_profile import RuntimeProfileConfig, write_s3f_runtime_profile_outputs
 
@@ -69,6 +70,28 @@ def main() -> None:
             particle_seed=args.particle_seed,
         )
         outputs = write_baseline_comparison_outputs(
+            output_dir=args.output_dir,
+            config=config,
+            write_plots=not args.no_plots,
+        )
+        for label, path in outputs.items():
+            print(f"Wrote {label}: {path}")
+        return
+
+    if args.command == "quality-cost":
+        config = QualityCostConfig(
+            reference=HighResReferenceConfig(
+                pilot=PilotConfig(
+                    grid_sizes=tuple(args.grid_sizes),
+                    variants=QUALITY_COST_VARIANTS,
+                    n_trials=args.trials,
+                    n_steps=args.steps,
+                    seed=args.seed,
+                ),
+                reference_grid_size=args.reference_grid_size,
+            )
+        )
+        outputs = write_quality_cost_outputs(
             output_dir=args.output_dir,
             config=config,
             write_plots=not args.no_plots,
@@ -192,6 +215,22 @@ def _parse_args() -> argparse.Namespace:
     comparison.add_argument("--particle-count", type=int, default=1024)
     comparison.add_argument("--particle-seed", type=int, default=101)
     comparison.add_argument("--no-plots", action="store_true")
+
+    quality_cost = subparsers.add_parser(
+        "quality-cost",
+        help="Summarize relaxed S3F quality, consistency, runtime, and high-resolution reference error.",
+    )
+    quality_cost.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("results") / "quality_cost",
+    )
+    quality_cost.add_argument("--grid-sizes", type=int, nargs="+", default=[8, 16, 32, 64])
+    quality_cost.add_argument("--reference-grid-size", type=int, default=256)
+    quality_cost.add_argument("--trials", type=int, default=16)
+    quality_cost.add_argument("--steps", type=int, default=16)
+    quality_cost.add_argument("--seed", type=int, default=17)
+    quality_cost.add_argument("--no-plots", action="store_true")
 
     sensitivity = subparsers.add_parser(
         "particle-sensitivity",
