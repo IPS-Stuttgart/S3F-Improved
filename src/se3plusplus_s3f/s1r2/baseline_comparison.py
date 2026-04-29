@@ -14,7 +14,7 @@ import numpy as np
 from pyrecest.filters.relaxed_s3f_circular import circular_error, rotation_matrix
 from scipy.special import i0, i1
 
-from .plotting import format_plot_list
+from .plotting import format_plot_list, save_figure
 from .relaxed_s3f_pilot import (
     VARIANT_LABELS,
     PilotConfig,
@@ -55,6 +55,21 @@ class BaselineComparisonConfig:
     particle_resample_threshold: float = 0.5
 
 
+@dataclass(frozen=True)
+class ParticleSensitivityConfig:
+    """Configuration for S3F-vs-particle accuracy/runtime sensitivity."""
+
+    pilot: PilotConfig = field(
+        default_factory=lambda: PilotConfig(
+            n_trials=32,
+            n_steps=20,
+        )
+    )
+    particle_counts: tuple[int, ...] = (128, 256, 512, 1024, 2048, 4096, 8192)
+    particle_seed: int = 101
+    particle_resample_threshold: float = 0.5
+
+
 @dataclass
 class _MetricAccumulator:
     position_sq_error: float = 0.0
@@ -72,6 +87,17 @@ def baseline_comparison_config_to_dict(config: BaselineComparisonConfig) -> dict
     return {
         "pilot": pilot_config_to_dict(config.pilot),
         "particle_count": config.particle_count,
+        "particle_seed": config.particle_seed,
+        "particle_resample_threshold": config.particle_resample_threshold,
+    }
+
+
+def particle_sensitivity_config_to_dict(config: ParticleSensitivityConfig) -> dict[str, Any]:
+    """Return a JSON-serializable particle sensitivity config."""
+
+    return {
+        "pilot": pilot_config_to_dict(config.pilot),
+        "particle_counts": list(config.particle_counts),
         "particle_seed": config.particle_seed,
         "particle_resample_threshold": config.particle_resample_threshold,
     }
@@ -96,6 +122,38 @@ def run_baseline_comparison_on_trials(
     rows = [_comparison_row_from_s3f(row) for row in run_relaxed_s3f_pilot_on_trials(config.pilot, trials)]
     rows.append(_run_ekf_baseline(config.pilot, trials))
     rows.append(_run_particle_baseline(config, trials))
+    return rows
+
+
+def run_particle_sensitivity(
+    config: ParticleSensitivityConfig = ParticleSensitivityConfig(),
+) -> list[dict[str, float | int | str]]:
+    """Compare S3F grid sizes against a sweep of bootstrap particle counts."""
+
+    trials = generate_pilot_trials(config.pilot)
+    return run_particle_sensitivity_on_trials(config, trials)
+
+
+def run_particle_sensitivity_on_trials(
+    config: ParticleSensitivityConfig,
+    trials: list[dict[str, np.ndarray | float]],
+) -> list[dict[str, float | int | str]]:
+    """Run the particle sensitivity benchmark on precomputed shared trials."""
+
+    _validate_particle_sensitivity_config(config)
+    rows = [_comparison_row_from_s3f(row) for row in run_relaxed_s3f_pilot_on_trials(config.pilot, trials)]
+    rows.extend(
+        _run_particle_baseline(
+            BaselineComparisonConfig(
+                pilot=config.pilot,
+                particle_count=particle_count,
+                particle_seed=config.particle_seed,
+                particle_resample_threshold=config.particle_resample_threshold,
+            ),
+            trials,
+        )
+        for particle_count in config.particle_counts
+    )
     return rows
 
 
@@ -127,9 +185,46 @@ def write_baseline_comparison_outputs(
     return outputs
 
 
+def write_particle_sensitivity_outputs(
+    output_dir: Path,
+    config: ParticleSensitivityConfig = ParticleSensitivityConfig(),
+    write_plots: bool = True,
+) -> dict[str, Path]:
+    """Run particle sensitivity and write CSV, optional plots, metadata, and a short note."""
+
+    output_dir = output_dir.resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rows = run_particle_sensitivity(config)
+
+    metrics_path = output_dir / "particle_sensitivity_metrics.csv"
+    _write_csv(metrics_path, rows)
+
+    outputs = {"metrics": metrics_path}
+    plot_paths = _write_sensitivity_plots(output_dir, rows) if write_plots else []
+    outputs.update({plot_path.stem: plot_path for plot_path in plot_paths})
+
+    note_path = output_dir / "particle_sensitivity_note.md"
+    _write_particle_sensitivity_note(note_path, rows, metrics_path, plot_paths, config)
+    outputs["note"] = note_path
+
+    metadata_path = output_dir / "run_metadata.json"
+    _write_particle_sensitivity_metadata(metadata_path, rows, config)
+    outputs["metadata"] = metadata_path
+    return outputs
+
+
 def _validate_config(config: BaselineComparisonConfig) -> None:
     if config.particle_count <= 0:
         raise ValueError("particle_count must be positive.")
+    if not 0.0 < config.particle_resample_threshold <= 1.0:
+        raise ValueError("particle_resample_threshold must be in (0, 1].")
+
+
+def _validate_particle_sensitivity_config(config: ParticleSensitivityConfig) -> None:
+    if not config.particle_counts:
+        raise ValueError("particle_counts must not be empty.")
+    if min(config.particle_counts) <= 0:
+        raise ValueError("particle_counts must be positive.")
     if not 0.0 < config.particle_resample_threshold <= 1.0:
         raise ValueError("particle_resample_threshold must be in (0, 1].")
 
@@ -447,6 +542,17 @@ def _write_metadata(path: Path, rows: list[dict[str, float | int | str]], config
     path.write_text(f"{serialized_metadata}\n", encoding="utf-8")
 
 
+def _write_particle_sensitivity_metadata(path: Path, rows: list[dict[str, float | int | str]], config: ParticleSensitivityConfig) -> None:
+    metadata = dict(
+        config=particle_sensitivity_config_to_dict(config),
+        experiment="particle_sensitivity",
+        metrics_rows=len(rows),
+        metrics_schema=BASELINE_COMPARISON_FIELDNAMES,
+    )
+    serialized_metadata = json.dumps(metadata, indent=2, sort_keys=True)
+    path.write_text(f"{serialized_metadata}\n", encoding="utf-8")
+
+
 def _write_bar_plots(output_dir: Path, rows: list[dict[str, float | int | str]]) -> list[Path]:
     plot_specs = [
         ("position_rmse", "Translation RMSE", "baseline_translation_rmse.png"),
@@ -462,12 +568,90 @@ def _write_bar_plots(output_dir: Path, rows: list[dict[str, float | int | str]])
         ax.set_ylabel(ylabel)
         ax.grid(True, axis="y", alpha=0.3)
         ax.tick_params(axis="x", labelrotation=35)
-        fig.tight_layout()
-        path = output_dir / filename
-        fig.savefig(path, dpi=160)
-        plt.close(fig)
+        path = save_figure(fig, output_dir, filename)
         paths.append(path)
     return paths
+
+
+def _write_sensitivity_plots(output_dir: Path, rows: list[dict[str, float | int | str]]) -> list[Path]:
+    plot_specs = [
+        ("position_rmse", "Translation RMSE", "particle_sensitivity_rmse_runtime.png"),
+        ("orientation_mean_error_rad", "Mean Orientation Error [rad]", "particle_sensitivity_orientation_runtime.png"),
+        ("coverage_95", "Empirical 95% Coverage", "particle_sensitivity_coverage_runtime.png"),
+        ("runtime_ms_per_step", "Runtime [ms/step]", "particle_sensitivity_runtime_resource.png"),
+    ]
+    paths = []
+    for metric, ylabel, filename in plot_specs:
+        fig, ax = plt.subplots(figsize=(8.2, 4.8))
+        if metric == "runtime_ms_per_step":
+            _plot_runtime_by_resource(ax, rows)
+            ax.set_ylabel(ylabel)
+        else:
+            _plot_metric_by_runtime(ax, rows, metric)
+            ax.set_xlabel("Runtime [ms/step]")
+            ax.set_ylabel(ylabel)
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        path = save_figure(fig, output_dir, filename)
+        paths.append(path)
+    return paths
+
+
+def _plot_metric_by_runtime(ax, rows: list[dict[str, float | int | str]], metric: str) -> None:
+    for variant in VARIANT_LABELS:
+        variant_rows = _s3f_variant_rows(rows, variant)
+        ax.plot(
+            [float(row["runtime_ms_per_step"]) for row in variant_rows],
+            [float(row[metric]) for row in variant_rows],
+            marker="o",
+            linewidth=1.7,
+            label=VARIANT_LABELS[variant],
+        )
+
+    particle_rows = _particle_rows(rows)
+    ax.plot(
+        [float(row["runtime_ms_per_step"]) for row in particle_rows],
+        [float(row[metric]) for row in particle_rows],
+        marker="s",
+        linewidth=1.7,
+        label="Particle filter",
+    )
+
+
+def _plot_runtime_by_resource(ax, rows: list[dict[str, float | int | str]]) -> None:
+    for variant in VARIANT_LABELS:
+        variant_rows = _s3f_variant_rows(rows, variant)
+        ax.plot(
+            [int(row["grid_size"]) for row in variant_rows],
+            [float(row["runtime_ms_per_step"]) for row in variant_rows],
+            marker="o",
+            linewidth=1.7,
+            label=f"{VARIANT_LABELS[variant]} by cells",
+        )
+
+    particle_rows = _particle_rows(rows)
+    ax.plot(
+        [int(row["particle_count"]) for row in particle_rows],
+        [float(row["runtime_ms_per_step"]) for row in particle_rows],
+        marker="s",
+        linewidth=1.7,
+        label="Particle filter by particles",
+    )
+    ax.set_xlabel("Cells or particles")
+
+
+def _s3f_variant_rows(rows: list[dict[str, float | int | str]], variant: str) -> list[dict[str, float | int | str]]:
+    return sorted(
+        [row for row in rows if row["filter"] == "s3f" and row["variant"] == variant],
+        key=lambda row: int(row["grid_size"]),
+    )
+
+
+def _particle_rows(rows: list[dict[str, float | int | str]]) -> list[dict[str, float | int | str]]:
+    return sorted(
+        [row for row in rows if row["filter"] == "particle_filter"],
+        key=lambda row: int(row["particle_count"]),
+    )
 
 
 def _write_note(
@@ -504,6 +688,47 @@ def _write_note(
         "The EKF baseline is deliberately local and single-modal, while the particle",
         "filter can carry multiple orientation hypotheses at a higher sampling cost.",
         "This remains a synthetic model comparison rather than a drone or VIO benchmark.",
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_particle_sensitivity_note(
+    path: Path,
+    rows: list[dict[str, float | int | str]],
+    metrics_path: Path,
+    plot_paths: list[Path],
+    config: ParticleSensitivityConfig,
+) -> None:
+    s3f_rows = [row for row in rows if row["filter"] == "s3f"]
+    particle_rows = [row for row in rows if row["filter"] == "particle_filter"]
+    best_s3f = min(s3f_rows, key=lambda row: float(row["position_rmse"]))
+    best_particle = min(particle_rows, key=lambda row: float(row["position_rmse"]))
+    best_coverage = min(rows, key=lambda row: abs(float(row["coverage_95"]) - 0.95))
+    lines = [
+        "# Particle Sensitivity Note",
+        "",
+        "Shared synthetic S1 x R2 trials were evaluated with relaxed S3F grids and",
+        "a bootstrap particle filter over multiple particle counts.",
+        "",
+        f"Trials: {config.pilot.n_trials}",
+        f"Steps per trial: {config.pilot.n_steps}",
+        f"S3F grid sizes: {list(config.pilot.grid_sizes)}",
+        f"Particle counts: {list(config.particle_counts)}",
+        f"Metrics file: `{metrics_path.name}`",
+        "",
+        f"Best S3F RMSE: `{_row_label(best_s3f)}` at `{float(best_s3f['position_rmse']):.4f}`.",
+        f"Best particle-filter RMSE: `{_row_label(best_particle)}` at `{float(best_particle['position_rmse']):.4f}`.",
+        (
+            "Coverage closest to 95%: "
+            f"`{_row_label(best_coverage)}` at `{float(best_coverage['coverage_95']):.3f}` "
+            f"with mean NEES `{float(best_coverage['mean_nees']):.3f}`."
+        ),
+        "",
+        "Plots:",
+        format_plot_list(plot_paths),
+        "",
+        "This benchmark is intended to show the accuracy-runtime tradeoff across",
+        "particle counts, not to establish final dominance of one filter family.",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
