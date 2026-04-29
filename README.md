@@ -95,6 +95,12 @@ table, plots, metadata, and a short note to `results/quality_cost/`. For a
 reproducible runner-side report without committing generated files, use the
 manual GitHub Actions workflow `Quality Cost Report`.
 
+Use `--repeats N` or the workflow repeat input to rerun the quality-cost
+comparison with independent seeds. Repeated runs add
+`quality_cost_repeat_pareto.csv` and `quality_cost_summary.csv` to the report
+artifact, including mean, standard deviation, and approximate 95% CI columns for
+the Pareto rows.
+
 ## Sweep Particle Counts
 
 To study the accuracy-runtime tradeoff between relaxed S3F grids and bootstrap

@@ -28,6 +28,11 @@ on:
         required: true
         default: 20
         type: number
+      repeats:
+        description: Independent seed repeats for uncertainty summary.
+        required: true
+        default: 1
+        type: number
       retention_days:
         description: Days to retain the uploaded report artifact.
         required: true
@@ -49,6 +54,7 @@ jobs:
       REFERENCE_GRID_SIZE: ${{ inputs.reference_grid_size }}
       TRIALS: ${{ inputs.trials }}
       STEPS: ${{ inputs.steps }}
+      REPEATS: ${{ inputs.repeats }}
       OUTPUT_DIR: results/quality_cost
 
     steps:
@@ -90,6 +96,10 @@ jobs:
               exit 1
             fi
           done
+          if ! [[ "$REPEATS" =~ ^[0-9]+$ ]] || [[ "$REPEATS" -le 0 ]]; then
+            echo "Repeats must be a positive integer: $REPEATS" >&2
+            exit 1
+          fi
 
           python -m se3plusplus_s3f.cli \
             quality-cost \
@@ -98,6 +108,7 @@ jobs:
             --particle-counts "${particle_counts[@]}" \
             --trials "$TRIALS" \
             --steps "$STEPS" \
+            --repeats "$REPEATS" \
             --output-dir "$OUTPUT_DIR"
 
       - name: Validate report artifact contents
@@ -113,6 +124,8 @@ jobs:
           metrics = report_dir / "quality_cost_metrics.csv"
           claims = report_dir / "quality_cost_claims.csv"
           pareto = report_dir / "quality_cost_pareto.csv"
+          repeat_pareto = report_dir / "quality_cost_repeat_pareto.csv"
+          summary = report_dir / "quality_cost_summary.csv"
           metadata_file = report_dir / "run_metadata.json"
           note = report_dir / "quality_cost_note.md"
 
@@ -125,6 +138,7 @@ jobs:
           pareto_rows = list(csv.DictReader(pareto.open(newline="", encoding="utf-8")))
           grid_count = len(os.environ["GRID_SIZES"].split())
           particle_count = len(os.environ["PARTICLE_COUNTS"].split())
+          repeats = int(os.environ["REPEATS"])
           expected_metric_rows = 3 * grid_count
           expected_claim_rows = grid_count + max(grid_count - 1, 0)
           expected_pareto_rows = expected_metric_rows + particle_count
@@ -152,11 +166,32 @@ jobs:
                   if not math.isfinite(float(row[column])):
                       raise AssertionError(row)
 
+          repeat_pareto_rows = []
+          summary_rows = []
+          if repeats > 1:
+              missing_repeat = [path for path in (repeat_pareto, summary) if not path.exists()]
+              if missing_repeat:
+                  raise FileNotFoundError(missing_repeat)
+              repeat_pareto_rows = list(csv.DictReader(repeat_pareto.open(newline="", encoding="utf-8")))
+              summary_rows = list(csv.DictReader(summary.open(newline="", encoding="utf-8")))
+              if len(repeat_pareto_rows) != repeats * expected_pareto_rows:
+                  raise AssertionError((repeats * expected_pareto_rows, len(repeat_pareto_rows)))
+              if len(summary_rows) != expected_pareto_rows:
+                  raise AssertionError((expected_pareto_rows, len(summary_rows)))
+              for row in summary_rows:
+                  if int(row["n_repeats"]) != repeats:
+                      raise AssertionError(row)
+                  for column in ("position_rmse_mean", "position_rmse_std", "runtime_ms_per_step_mean", "runtime_ms_per_step_std"):
+                      if not math.isfinite(float(row[column])):
+                          raise AssertionError(row)
+
           metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
           if (
               metadata["metrics_rows"] != len(metric_rows)
               or metadata["claims_rows"] != len(claim_rows)
               or metadata["pareto_rows"] != len(pareto_rows)
+              or metadata["repeat_pareto_rows"] != len(repeat_pareto_rows)
+              or metadata["summary_rows"] != len(summary_rows)
           ):
               raise AssertionError(metadata)
 

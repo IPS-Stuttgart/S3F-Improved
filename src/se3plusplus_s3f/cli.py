@@ -92,6 +92,8 @@ def main() -> None:
             ),
             particle_counts=tuple(args.particle_counts),
             particle_seed=args.particle_seed,
+            repeats=args.repeats,
+            repeat_seed_stride=args.repeat_seed_stride,
         )
         outputs = write_quality_cost_outputs(
             output_dir=args.output_dir,
@@ -234,6 +236,8 @@ def _parse_args() -> argparse.Namespace:
     quality_cost.add_argument("--seed", type=int, default=17)
     quality_cost.add_argument("--particle-counts", type=int, nargs="+", default=[128, 512, 2048, 8192])
     quality_cost.add_argument("--particle-seed", type=int, default=101)
+    quality_cost.add_argument("--repeats", type=int, default=1)
+    quality_cost.add_argument("--repeat-seed-stride", type=int, default=1000)
     quality_cost.add_argument("--no-plots", action="store_true")
 
     sensitivity = subparsers.add_parser(

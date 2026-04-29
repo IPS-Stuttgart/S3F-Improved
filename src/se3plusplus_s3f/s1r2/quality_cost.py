@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +75,37 @@ QUALITY_COST_PARETO_FIELDNAMES = [
     "n_steps",
 ]
 
+QUALITY_COST_REPEAT_PARETO_FIELDNAMES = [
+    "repeat_index",
+    "seed",
+    "particle_seed",
+    *QUALITY_COST_PARETO_FIELDNAMES,
+]
+
+QUALITY_COST_SUMMARY_FIELDNAMES = [
+    "filter",
+    "label",
+    "variant",
+    "grid_size",
+    "particle_count",
+    "resource_count",
+    "position_rmse_mean",
+    "position_rmse_std",
+    "position_rmse_ci95_low",
+    "position_rmse_ci95_high",
+    "mean_nees_mean",
+    "mean_nees_std",
+    "coverage_95_mean",
+    "coverage_95_std",
+    "runtime_ms_per_step_mean",
+    "runtime_ms_per_step_std",
+    "runtime_ms_per_step_ci95_low",
+    "runtime_ms_per_step_ci95_high",
+    "n_repeats",
+    "n_trials",
+    "n_steps",
+]
+
 QUALITY_COST_VARIANTS = ("baseline", "r1", "r1_r2")
 QUALITY_COST_PARTICLE_COUNTS = (128, 512, 2048, 8192)
 
@@ -85,6 +117,8 @@ class QualityCostResult:
     metrics: list[dict[str, float | int | str]]
     claims: list[dict[str, float | int | str | bool]]
     pareto: list[dict[str, float | int | str]]
+    repeat_pareto: list[dict[str, float | int | str]] = field(default_factory=list)
+    summary: list[dict[str, float | int | str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -105,6 +139,8 @@ class QualityCostConfig:
     particle_counts: tuple[int, ...] = QUALITY_COST_PARTICLE_COUNTS
     particle_seed: int = 101
     particle_resample_threshold: float = 0.5
+    repeats: int = 1
+    repeat_seed_stride: int = 1000
 
 
 def quality_cost_config_to_dict(config: QualityCostConfig) -> dict[str, Any]:
@@ -113,12 +149,34 @@ def quality_cost_config_to_dict(config: QualityCostConfig) -> dict[str, Any]:
     return {
         "reference": highres_reference_config_to_dict(config.reference),
         "particle_sensitivity": particle_sensitivity_config_to_dict(_particle_config(config)),
+        "repeats": config.repeats,
+        "repeat_seed_stride": config.repeat_seed_stride,
     }
 
 
 def run_quality_cost_report(config: QualityCostConfig = QualityCostConfig()) -> QualityCostResult:
     """Run the quality-vs-cost report from a high-resolution S3F reference sweep."""
 
+    if config.repeats <= 0:
+        raise ValueError("repeats must be positive.")
+
+    repeat_results = [_run_single_quality_cost_report(_repeat_config(config, repeat_index)) for repeat_index in range(config.repeats)]
+    result = repeat_results[0]
+    if config.repeats == 1:
+        return result
+
+    repeat_pareto = _repeat_pareto_rows(config, repeat_results)
+    summary = _summarize_repeat_pareto(repeat_pareto)
+    return QualityCostResult(
+        metrics=result.metrics,
+        claims=result.claims,
+        pareto=result.pareto,
+        repeat_pareto=repeat_pareto,
+        summary=summary,
+    )
+
+
+def _run_single_quality_cost_report(config: QualityCostConfig) -> QualityCostResult:
     reference_rows = run_highres_reference_benchmark(config.reference)
     rows = [_quality_row_from_reference(row) for row in reference_rows]
     claims = _build_claim_rows(rows)
@@ -147,6 +205,14 @@ def write_quality_cost_outputs(
     _write_csv(pareto_path, result.pareto, QUALITY_COST_PARETO_FIELDNAMES)
 
     outputs = {"metrics": metrics_path, "claims": claims_path, "pareto": pareto_path}
+    repeat_pareto_path = output_dir / "quality_cost_repeat_pareto.csv"
+    summary_path = output_dir / "quality_cost_summary.csv"
+    if result.repeat_pareto:
+        _write_csv(repeat_pareto_path, result.repeat_pareto, QUALITY_COST_REPEAT_PARETO_FIELDNAMES)
+        _write_csv(summary_path, result.summary, QUALITY_COST_SUMMARY_FIELDNAMES)
+        outputs["repeat_pareto"] = repeat_pareto_path
+        outputs["summary"] = summary_path
+
     plot_paths = _write_plots(output_dir, result.metrics, result.pareto) if write_plots else []
     outputs.update({plot_path.stem: plot_path for plot_path in plot_paths})
 
@@ -167,6 +233,99 @@ def _particle_config(config: QualityCostConfig) -> ParticleSensitivityConfig:
         particle_seed=config.particle_seed,
         particle_resample_threshold=config.particle_resample_threshold,
     )
+
+
+def _repeat_config(config: QualityCostConfig, repeat_index: int) -> QualityCostConfig:
+    seed_offset = repeat_index * config.repeat_seed_stride
+    repeat_pilot = replace(
+        config.reference.pilot,
+        seed=config.reference.pilot.seed + seed_offset,
+    )
+    return replace(
+        config,
+        reference=replace(config.reference, pilot=repeat_pilot),
+        particle_seed=config.particle_seed + seed_offset,
+        repeats=1,
+    )
+
+
+def _repeat_pareto_rows(
+    config: QualityCostConfig,
+    repeat_results: list[QualityCostResult],
+) -> list[dict[str, float | int | str]]:
+    rows = []
+    for repeat_index, result in enumerate(repeat_results):
+        repeat_config = _repeat_config(config, repeat_index)
+        for row in result.pareto:
+            rows.append(
+                {
+                    "repeat_index": repeat_index,
+                    "seed": repeat_config.reference.pilot.seed,
+                    "particle_seed": repeat_config.particle_seed,
+                    **row,
+                }
+            )
+    return rows
+
+
+def _summarize_repeat_pareto(rows: list[dict[str, float | int | str]]) -> list[dict[str, float | int | str]]:
+    grouped: dict[tuple[str, str, str, str, str, str], list[dict[str, float | int | str]]] = {}
+    for row in rows:
+        key = (
+            str(row["filter"]),
+            str(row["label"]),
+            str(row["variant"]),
+            str(row["grid_size"]),
+            str(row["particle_count"]),
+            str(row["resource_count"]),
+        )
+        grouped.setdefault(key, []).append(row)
+
+    summary = []
+    for key, group_rows in grouped.items():
+        filter_name, label, variant, grid_size, particle_count, resource_count = key
+        summary.append(
+            {
+                "filter": filter_name,
+                "label": label,
+                "variant": variant,
+                "grid_size": grid_size,
+                "particle_count": particle_count,
+                "resource_count": resource_count,
+                **_summary_metric_fields(group_rows, "position_rmse"),
+                **_summary_metric_fields(group_rows, "mean_nees", include_ci=False),
+                **_summary_metric_fields(group_rows, "coverage_95", include_ci=False),
+                **_summary_metric_fields(group_rows, "runtime_ms_per_step"),
+                "n_repeats": len(group_rows),
+                "n_trials": group_rows[0]["n_trials"],
+                "n_steps": group_rows[0]["n_steps"],
+            }
+        )
+    return sorted(summary, key=lambda row: (float(row["runtime_ms_per_step_mean"]), str(row["filter"])))
+
+
+def _summary_metric_fields(
+    rows: list[dict[str, float | int | str]],
+    metric: str,
+    include_ci: bool = True,
+) -> dict[str, float]:
+    values = [float(row[metric]) for row in rows]
+    mean_value = sum(values) / len(values)
+    if len(values) > 1:
+        variance = sum((value - mean_value) ** 2 for value in values) / (len(values) - 1)
+        std_value = math.sqrt(variance)
+    else:
+        std_value = 0.0
+
+    fields = {
+        f"{metric}_mean": mean_value,
+        f"{metric}_std": std_value,
+    }
+    if include_ci:
+        half_width = 1.96 * std_value / math.sqrt(len(values))
+        fields[f"{metric}_ci95_low"] = mean_value - half_width
+        fields[f"{metric}_ci95_high"] = mean_value + half_width
+    return fields
 
 
 def _quality_row_from_reference(row: dict[str, float | int | str]) -> dict[str, float | int | str]:
@@ -327,6 +486,10 @@ def _write_metadata(
         "claims_rows": len(result.claims),
         "pareto_schema": QUALITY_COST_PARETO_FIELDNAMES,
         "pareto_rows": len(result.pareto),
+        "repeat_pareto_schema": QUALITY_COST_REPEAT_PARETO_FIELDNAMES,
+        "repeat_pareto_rows": len(result.repeat_pareto),
+        "summary_schema": QUALITY_COST_SUMMARY_FIELDNAMES,
+        "summary_rows": len(result.summary),
     }
     path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -433,9 +596,11 @@ def _write_note(
         f"Grid sizes: {list(config.reference.pilot.grid_sizes)}",
         f"Reference grid size: {config.reference.reference_grid_size}",
         f"Particle counts: {list(config.particle_counts)}",
+        f"Repeats: {config.repeats}",
         f"Metrics file: `{metrics_path.name}`",
         f"Claims file: `{claims_path.name}`",
         f"Pareto file: `{pareto_path.name}`",
+        *_repeat_file_scope_lines(config),
         "",
         "## Best Rows",
         "",
@@ -466,12 +631,14 @@ def _write_note(
         "## RMSE-Runtime Frontier",
         "",
         _format_pareto_table(_rmse_runtime_frontier(result.pareto)),
+        *_repeat_summary_lines(result),
         "",
         "## Interpretation",
         "",
         _interpret_supported_claims(supported_grid_saving),
         _interpret_particle_comparison(best_r1_r2, best_particle),
         _interpret_nearest_particle_comparison(best_r1_r2, result.pareto),
+        _interpret_repeat_summary(result.summary),
         "",
         "Plots:",
         format_plot_list(plot_paths),
@@ -484,6 +651,14 @@ def _write_note(
 
 def _row_label(row: dict[str, float | int | str]) -> str:
     return f"{VARIANT_LABELS[str(row['variant'])]} ({row['grid_size']} cells)"
+
+
+def _repeat_file_scope_lines(config: QualityCostConfig) -> list[str]:
+    if config.repeats <= 1:
+        return []
+    return [
+        "Repeat summary files aggregate all repeats; metrics, claims, and Pareto files keep the first repeat schema for compatibility."
+    ]
 
 
 def _format_metrics_table(rows: list[dict[str, float | int | str]]) -> str:
@@ -543,6 +718,38 @@ def _format_pareto_table(rows: list[dict[str, float | int | str]]) -> str:
             f"{float(row['mean_nees']):.3f} | "
             f"{float(row['coverage_95']):.3f} | "
             f"{float(row['runtime_ms_per_step']):.3f} |"
+        )
+    return "\n".join([header, separator, *body])
+
+
+def _repeat_summary_lines(result: QualityCostResult) -> list[str]:
+    if not result.summary:
+        return []
+    return [
+        "",
+        "## Repeat Summary",
+        "",
+        _format_summary_table(result.summary),
+        "",
+        "Repeat summary file: `quality_cost_summary.csv`",
+        "Per-repeat Pareto file: `quality_cost_repeat_pareto.csv`",
+    ]
+
+
+def _format_summary_table(rows: list[dict[str, float | int | str]]) -> str:
+    header = "| Method | Resource | RMSE mean | RMSE 95% CI | Runtime mean | Runtime 95% CI | Repeats |"
+    separator = "|---|---:|---:|---|---:|---|---:|"
+    body = []
+    for row in sorted(rows, key=lambda item: (float(item["runtime_ms_per_step_mean"]), str(item["filter"]))):
+        body.append(
+            "| "
+            f"{row['label']} | "
+            f"{int(row['resource_count'])} | "
+            f"{float(row['position_rmse_mean']):.4f} | "
+            f"[{float(row['position_rmse_ci95_low']):.4f}, {float(row['position_rmse_ci95_high']):.4f}] | "
+            f"{float(row['runtime_ms_per_step_mean']):.3f} | "
+            f"[{float(row['runtime_ms_per_step_ci95_low']):.3f}, {float(row['runtime_ms_per_step_ci95_high']):.3f}] | "
+            f"{int(row['n_repeats'])} |"
         )
     return "\n".join([header, separator, *body])
 
@@ -652,3 +859,86 @@ def _interpret_nearest_particle_comparison(
             " In this run it is faster, but does not dominate the best R1+R2 row on RMSE."
         )
     return nearest_text + " " + comparison_text
+
+
+def _interpret_repeat_summary(summary: list[dict[str, float | int | str]]) -> str:
+    if not summary:
+        return ""
+
+    r1_r2_rows = [row for row in summary if row["filter"] == "s3f" and row["variant"] == "r1_r2"]
+    if not r1_r2_rows:
+        return "Repeat summary did not include an R1+R2 row."
+
+    particle_rows = [row for row in summary if row["filter"] == "particle_filter"]
+    if not particle_rows:
+        return "Repeat summary did not include particle-filter rows."
+
+    best_r1_r2 = min(r1_r2_rows, key=lambda row: float(row["position_rmse_mean"]))
+    nearest_runtime_particle = min(
+        particle_rows,
+        key=lambda row: abs(float(row["runtime_ms_per_step_mean"]) - float(best_r1_r2["runtime_ms_per_step_mean"])),
+    )
+    not_slower_particles = [
+        row
+        for row in particle_rows
+        if float(row["runtime_ms_per_step_mean"]) <= float(best_r1_r2["runtime_ms_per_step_mean"])
+    ]
+    best_not_slower_particle = (
+        min(not_slower_particles, key=lambda row: float(row["position_rmse_mean"]))
+        if not_slower_particles
+        else None
+    )
+    n_repeats = int(best_r1_r2["n_repeats"])
+
+    nearest_text = (
+        f"Across `{n_repeats}` repeats, nearest-runtime particle row by mean runtime is "
+        f"`{nearest_runtime_particle['label']}` with mean RMSE "
+        f"`{float(nearest_runtime_particle['position_rmse_mean']):.4f}` at "
+        f"`{float(nearest_runtime_particle['runtime_ms_per_step_mean']):.3f}` ms/step."
+    )
+    if best_not_slower_particle is None:
+        return nearest_text + " No particle row is at least as fast as the best R1+R2 row in repeat means."
+
+    comparison_text = (
+        f"Best particle row no slower than best R1+R2 in repeat means is "
+        f"`{best_not_slower_particle['label']}` with mean RMSE "
+        f"`{float(best_not_slower_particle['position_rmse_mean']):.4f}` at "
+        f"`{float(best_not_slower_particle['runtime_ms_per_step_mean']):.3f}` ms/step."
+    )
+    if _summary_dominates(best_not_slower_particle, best_r1_r2):
+        if _summary_ci_non_overlapping(best_not_slower_particle, best_r1_r2):
+            comparison_text += (
+                " It mean-dominates the best R1+R2 row with non-overlapping approximate 95% CIs."
+            )
+        else:
+            comparison_text += (
+                " It mean-dominates the best R1+R2 row, but the approximate 95% CIs overlap, so this should be treated as a trend rather than a robust separation."
+            )
+    else:
+        comparison_text += " No no-slower particle row dominates the best R1+R2 row in repeat means."
+    return nearest_text + " " + comparison_text
+
+
+def _summary_dominates(
+    candidate: dict[str, float | int | str],
+    comparator: dict[str, float | int | str],
+) -> bool:
+    candidate_rmse = float(candidate["position_rmse_mean"])
+    comparator_rmse = float(comparator["position_rmse_mean"])
+    candidate_runtime = float(candidate["runtime_ms_per_step_mean"])
+    comparator_runtime = float(comparator["runtime_ms_per_step_mean"])
+    return (
+        candidate_rmse <= comparator_rmse
+        and candidate_runtime <= comparator_runtime
+        and (candidate_rmse < comparator_rmse or candidate_runtime < comparator_runtime)
+    )
+
+
+def _summary_ci_non_overlapping(
+    candidate: dict[str, float | int | str],
+    comparator: dict[str, float | int | str],
+) -> bool:
+    return (
+        float(candidate["position_rmse_ci95_high"]) < float(comparator["position_rmse_ci95_low"])
+        and float(candidate["runtime_ms_per_step_ci95_high"]) < float(comparator["runtime_ms_per_step_ci95_low"])
+    )

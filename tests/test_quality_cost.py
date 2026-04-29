@@ -7,6 +7,7 @@ from se3plusplus_s3f.s1r2.highres_reference import HighResReferenceConfig
 from se3plusplus_s3f.s1r2.quality_cost import (
     QualityCostConfig,
     _interpret_nearest_particle_comparison,
+    _interpret_repeat_summary,
     _rmse_runtime_frontier,
     run_quality_cost_report,
     write_quality_cost_outputs,
@@ -108,6 +109,77 @@ def test_nearest_particle_interpretation_calls_out_dominance():
     assert "dominates the best R1+R2 row" in interpretation
 
 
+def test_quality_cost_repeats_write_summary_outputs(tmp_path):
+    config = QualityCostConfig(
+        reference=HighResReferenceConfig(
+            pilot=PilotConfig(
+                grid_sizes=(8,),
+                n_trials=1,
+                n_steps=1,
+                seed=3,
+            ),
+            reference_grid_size=16,
+        ),
+        particle_counts=(16,),
+        particle_seed=5,
+        repeats=2,
+        repeat_seed_stride=11,
+    )
+
+    result = run_quality_cost_report(config)
+
+    assert len(result.metrics) == 3
+    assert len(result.pareto) == 4
+    assert len(result.repeat_pareto) == 8
+    assert len(result.summary) == 4
+    assert {int(row["seed"]) for row in result.repeat_pareto} == {3, 14}
+    assert {int(row["particle_seed"]) for row in result.repeat_pareto} == {5, 16}
+    assert all(int(row["n_repeats"]) == 2 for row in result.summary)
+
+    outputs = write_quality_cost_outputs(tmp_path / "out", config, write_plots=False)
+    for output_name in ("repeat_pareto", "summary"):
+        assert outputs[output_name].is_file()
+
+    with outputs["repeat_pareto"].open(newline="", encoding="utf-8") as repeat_file:
+        assert len(list(csv.DictReader(repeat_file))) == 8
+    with outputs["summary"].open(newline="", encoding="utf-8") as summary_file:
+        assert len(list(csv.DictReader(summary_file))) == 4
+
+    metadata = json.loads(outputs["metadata"].read_text(encoding="utf-8"))
+    assert metadata["repeat_pareto_rows"] == 8
+    assert metadata["summary_rows"] == 4
+
+    note_text = outputs["note"].read_text(encoding="utf-8")
+    assert "## Repeat Summary" in note_text
+    assert "Across `2` repeats" in note_text
+
+
+def test_repeat_summary_interpretation_calls_out_nonoverlapping_ci():
+    best_r1_r2 = _summary_test_row(
+        "S3F + R1 + R2 (64 cells)",
+        "s3f",
+        "r1_r2",
+        rmse_mean=0.17,
+        rmse_ci=(0.168, 0.172),
+        runtime_mean=0.55,
+        runtime_ci=(0.54, 0.56),
+    )
+    particle = _summary_test_row(
+        "Particle filter (2048)",
+        "particle_filter",
+        "bootstrap",
+        rmse_mean=0.16,
+        rmse_ci=(0.158, 0.162),
+        runtime_mean=0.50,
+        runtime_ci=(0.49, 0.51),
+    )
+
+    interpretation = _interpret_repeat_summary([best_r1_r2, particle])
+
+    assert "Across `5` repeats" in interpretation
+    assert "non-overlapping approximate 95% CIs" in interpretation
+
+
 def _pareto_test_row(
     label: str,
     filter_name: str,
@@ -129,4 +201,38 @@ def _pareto_test_row(
         "runtime_ratio_to_reference": "",
         "n_trials": 1,
         "n_steps": 1,
+    }
+
+
+def _summary_test_row(
+    label: str,
+    filter_name: str,
+    variant: str,
+    rmse_mean: float,
+    rmse_ci: tuple[float, float],
+    runtime_mean: float,
+    runtime_ci: tuple[float, float],
+) -> dict[str, float | int | str]:
+    return {
+        "filter": filter_name,
+        "label": label,
+        "variant": variant,
+        "grid_size": 64 if filter_name == "s3f" else "",
+        "particle_count": "" if filter_name == "s3f" else 2048,
+        "resource_count": 64 if filter_name == "s3f" else 2048,
+        "position_rmse_mean": rmse_mean,
+        "position_rmse_std": 0.01,
+        "position_rmse_ci95_low": rmse_ci[0],
+        "position_rmse_ci95_high": rmse_ci[1],
+        "mean_nees_mean": 2.0,
+        "mean_nees_std": 0.1,
+        "coverage_95_mean": 0.95,
+        "coverage_95_std": 0.01,
+        "runtime_ms_per_step_mean": runtime_mean,
+        "runtime_ms_per_step_std": 0.01,
+        "runtime_ms_per_step_ci95_low": runtime_ci[0],
+        "runtime_ms_per_step_ci95_high": runtime_ci[1],
+        "n_repeats": 5,
+        "n_trials": 32,
+        "n_steps": 20,
     }
