@@ -126,6 +126,7 @@ jobs:
           pareto = report_dir / "quality_cost_pareto.csv"
           repeat_pareto = report_dir / "quality_cost_repeat_pareto.csv"
           summary = report_dir / "quality_cost_summary.csv"
+          pairwise = report_dir / "quality_cost_pairwise.csv"
           metadata_file = report_dir / "run_metadata.json"
           note = report_dir / "quality_cost_note.md"
 
@@ -168,6 +169,7 @@ jobs:
 
           repeat_pareto_rows = []
           summary_rows = []
+          pairwise_rows = []
           if repeats > 1:
               missing_repeat = [path for path in (repeat_pareto, summary) if not path.exists()]
               if missing_repeat:
@@ -184,6 +186,14 @@ jobs:
                   for column in ("position_rmse_mean", "position_rmse_std", "runtime_ms_per_step_mean", "runtime_ms_per_step_std"):
                       if not math.isfinite(float(row[column])):
                           raise AssertionError(row)
+              if pairwise.exists():
+                  pairwise_rows = list(csv.DictReader(pairwise.open(newline="", encoding="utf-8")))
+                  for row in pairwise_rows:
+                      if int(row["n_repeats"]) != repeats:
+                          raise AssertionError(row)
+                      for column in ("position_rmse_delta_mean", "position_rmse_delta_std", "runtime_ms_per_step_delta_mean", "runtime_ratio_mean"):
+                          if not math.isfinite(float(row[column])):
+                              raise AssertionError(row)
 
           metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
           if (
@@ -192,6 +202,7 @@ jobs:
               or metadata["pareto_rows"] != len(pareto_rows)
               or metadata["repeat_pareto_rows"] != len(repeat_pareto_rows)
               or metadata["summary_rows"] != len(summary_rows)
+              or metadata["pairwise_rows"] != len(pairwise_rows)
           ):
               raise AssertionError(metadata)
 

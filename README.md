@@ -98,8 +98,9 @@ manual GitHub Actions workflow `Quality Cost Report`.
 Use `--repeats N` or the workflow repeat input to rerun the quality-cost
 comparison with independent seeds. Repeated runs add
 `quality_cost_repeat_pareto.csv` and `quality_cost_summary.csv` to the report
-artifact, including mean, standard deviation, and approximate 95% CI columns for
-the Pareto rows.
+artifact, including mean, standard deviation, and approximate 95% CI columns.
+When selected candidate/comparator resources are present, repeated runs also add
+`quality_cost_pairwise.csv` with paired candidate-minus-comparator deltas.
 
 ## Sweep Particle Counts
 

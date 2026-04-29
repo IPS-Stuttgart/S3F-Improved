@@ -113,14 +113,14 @@ def test_quality_cost_repeats_write_summary_outputs(tmp_path):
     config = QualityCostConfig(
         reference=HighResReferenceConfig(
             pilot=PilotConfig(
-                grid_sizes=(8,),
+                grid_sizes=(8, 16),
                 n_trials=1,
                 n_steps=1,
                 seed=3,
             ),
-            reference_grid_size=16,
+            reference_grid_size=32,
         ),
-        particle_counts=(16,),
+        particle_counts=(512,),
         particle_seed=5,
         repeats=2,
         repeat_seed_stride=11,
@@ -128,29 +128,36 @@ def test_quality_cost_repeats_write_summary_outputs(tmp_path):
 
     result = run_quality_cost_report(config)
 
-    assert len(result.metrics) == 3
-    assert len(result.pareto) == 4
-    assert len(result.repeat_pareto) == 8
-    assert len(result.summary) == 4
+    assert len(result.metrics) == 6
+    assert len(result.pareto) == 7
+    assert len(result.repeat_pareto) == 14
+    assert len(result.summary) == 7
+    assert len(result.pairwise) == 1
+    assert result.pairwise[0]["pair_id"] == "r1_r2_8_vs_baseline_16"
+    assert np.isfinite(float(result.pairwise[0]["position_rmse_delta_mean"]))
     assert {int(row["seed"]) for row in result.repeat_pareto} == {3, 14}
     assert {int(row["particle_seed"]) for row in result.repeat_pareto} == {5, 16}
     assert all(int(row["n_repeats"]) == 2 for row in result.summary)
 
     outputs = write_quality_cost_outputs(tmp_path / "out", config, write_plots=False)
-    for output_name in ("repeat_pareto", "summary"):
+    for output_name in ("repeat_pareto", "summary", "pairwise"):
         assert outputs[output_name].is_file()
 
     with outputs["repeat_pareto"].open(newline="", encoding="utf-8") as repeat_file:
-        assert len(list(csv.DictReader(repeat_file))) == 8
+        assert len(list(csv.DictReader(repeat_file))) == 14
     with outputs["summary"].open(newline="", encoding="utf-8") as summary_file:
-        assert len(list(csv.DictReader(summary_file))) == 4
+        assert len(list(csv.DictReader(summary_file))) == 7
+    with outputs["pairwise"].open(newline="", encoding="utf-8") as pairwise_file:
+        assert len(list(csv.DictReader(pairwise_file))) == 1
 
     metadata = json.loads(outputs["metadata"].read_text(encoding="utf-8"))
-    assert metadata["repeat_pareto_rows"] == 8
-    assert metadata["summary_rows"] == 4
+    assert metadata["repeat_pareto_rows"] == 14
+    assert metadata["summary_rows"] == 7
+    assert metadata["pairwise_rows"] == 1
 
     note_text = outputs["note"].read_text(encoding="utf-8")
     assert "## Repeat Summary" in note_text
+    assert "## Paired Comparisons" in note_text
     assert "Across `2` repeats" in note_text
 
 
