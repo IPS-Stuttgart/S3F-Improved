@@ -81,6 +81,20 @@ manual GitHub Actions workflow `Baseline Comparison Benchmark`. It uploads the
 generated CSV, plots, metadata, and note as a workflow artifact attached to the
 Actions run.
 
+## Report Quality vs Cost
+
+To combine relaxed S3F accuracy, consistency, runtime, and distance to a
+high-resolution S3F reference in one report:
+
+```bash
+se3plusplus-s3f quality-cost
+```
+
+This writes a metrics table, grid-saving claims table, plots, metadata, and a
+short note to `results/quality_cost/`. For a reproducible runner-side report
+without committing generated files, use the manual GitHub Actions workflow
+`Quality Cost Report`.
+
 ## Sweep Particle Counts
 
 To study the accuracy-runtime tradeoff between relaxed S3F grids and bootstrap
