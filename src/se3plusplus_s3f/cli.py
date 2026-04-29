@@ -17,6 +17,7 @@ from .s1r2.highres_reference import HighResReferenceConfig, write_highres_refere
 from .s1r2.quality_cost import QUALITY_COST_VARIANTS, QualityCostConfig, write_quality_cost_outputs
 from .s1r2.relaxed_s3f_pilot import PilotConfig, load_pilot_config, write_relaxed_s3f_pilot_outputs
 from .s1r2.runtime_profile import RuntimeProfileConfig, write_s3f_runtime_profile_outputs
+from .s3r3.relaxed_s3f_prototype import S3R3PrototypeConfig, write_s3r3_relaxed_outputs
 
 
 def main() -> None:
@@ -164,6 +165,23 @@ def main() -> None:
             print(f"Wrote {label}: {path}")
         return
 
+    if args.command == "s3r3-relaxed":
+        config = S3R3PrototypeConfig(
+            grid_sizes=tuple(args.grid_sizes),
+            n_trials=args.trials,
+            n_steps=args.steps,
+            seed=args.seed,
+            cell_sample_count=args.cell_sample_count,
+        )
+        outputs = write_s3r3_relaxed_outputs(
+            output_dir=args.output_dir,
+            config=config,
+            write_plots=not args.no_plots,
+        )
+        for label, path in outputs.items():
+            print(f"Wrote {label}: {path}")
+        return
+
     raise ValueError(f"Unknown command {args.command!r}.")
 
 
@@ -292,6 +310,22 @@ def _parse_args() -> argparse.Namespace:
     euroc.add_argument("--process-noise-std", type=float, default=0.01)
     euroc.add_argument("--initial-position-std", type=float, default=0.08)
     euroc.add_argument("--orientation-prior-kappa", type=float, default=6.0)
+
+    s3r3 = subparsers.add_parser(
+        "s3r3-relaxed",
+        help="Run the minimal S3+ x R3 relaxed S3F prototype benchmark.",
+    )
+    s3r3.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("results") / "s3r3_relaxed",
+    )
+    s3r3.add_argument("--grid-sizes", type=int, nargs="+", default=[16, 32])
+    s3r3.add_argument("--trials", type=int, default=8)
+    s3r3.add_argument("--steps", type=int, default=8)
+    s3r3.add_argument("--seed", type=int, default=23)
+    s3r3.add_argument("--cell-sample-count", type=int, default=27)
+    s3r3.add_argument("--no-plots", action="store_true")
     return parser.parse_args()
 
 
