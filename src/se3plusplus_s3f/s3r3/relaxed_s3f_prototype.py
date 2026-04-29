@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -85,22 +85,7 @@ class S3R3PrototypeConfig:
 def s3r3_prototype_config_to_dict(config: S3R3PrototypeConfig) -> dict[str, Any]:
     """Return a JSON-serializable S3R3 prototype config."""
 
-    return {
-        "grid_sizes": list(config.grid_sizes),
-        "variants": list(config.variants),
-        "n_trials": config.n_trials,
-        "n_steps": config.n_steps,
-        "seed": config.seed,
-        "body_increment": list(config.body_increment),
-        "measurement_noise_std": config.measurement_noise_std,
-        "process_noise_std": config.process_noise_std,
-        "initial_position_std": config.initial_position_std,
-        "prior_modes": [list(mode) for mode in config.prior_modes],
-        "prior_weights": list(config.prior_weights),
-        "prior_kappa": config.prior_kappa,
-        "orientation_noise_std": config.orientation_noise_std,
-        "cell_sample_count": config.cell_sample_count,
-    }
+    return json.loads(json.dumps(asdict(config)))
 
 
 def run_s3r3_relaxed_prototype(config: S3R3PrototypeConfig = S3R3PrototypeConfig()) -> list[dict[str, float | int | str]]:
@@ -373,12 +358,20 @@ def _tangent_cell_offsets(cell_radius: float, sample_count: int) -> np.ndarray:
 
 def _linear_position_error_stats(filter_: StateSpaceSubdivisionFilter, true_position: np.ndarray) -> tuple[np.ndarray, float]:
     state = filter_.filter_state
-    mean = np.asarray(state.linear_mean(), dtype=float)
-    covariance = np.asarray(state.linear_covariance(), dtype=float)
-    error = mean - np.asarray(true_position, dtype=float)
-    covariance_reg = covariance + 1e-10 * np.eye(error.shape[0])
-    nees = float(error @ np.linalg.solve(covariance_reg, error))
-    return error, nees
+    error = np.subtract(
+        np.asarray(state.linear_mean(), dtype=float),
+        np.asarray(true_position, dtype=float),
+    )
+    covariance = _regularized_covariance(np.asarray(state.linear_covariance(), dtype=float), error.size)
+    return error, _quadratic_form(error, covariance)
+
+
+def _regularized_covariance(covariance: np.ndarray, dimension: int) -> np.ndarray:
+    return covariance + 1e-10 * np.eye(dimension, dtype=float)
+
+
+def _quadratic_form(vector: np.ndarray, matrix: np.ndarray) -> float:
+    return float(np.dot(vector, np.linalg.solve(matrix, vector)))
 
 
 def _orientation_mode_error(filter_: StateSpaceSubdivisionFilter, true_orientation: np.ndarray) -> float:
@@ -467,9 +460,10 @@ def _symmetrize(matrix: np.ndarray) -> np.ndarray:
 
 def _write_csv(path: Path, rows: list[dict[str, float | int | str]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=METRIC_FIELDNAMES)
+        writer = csv.DictWriter(file, fieldnames=METRIC_FIELDNAMES, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(rows)
+        for row in rows:
+            writer.writerow({name: row[name] for name in METRIC_FIELDNAMES})
 
 
 def _write_metadata(
@@ -552,20 +546,25 @@ def _write_plots(output_dir: Path, rows: list[dict[str, float | int | str]]) -> 
     for metric, ylabel, filename in specs:
         fig, ax = plt.subplots(figsize=(7.0, 4.2))
         for variant in SUPPORTED_S3R3_VARIANTS:
-            variant_rows = sorted(
-                [row for row in rows if row["variant"] == variant],
-                key=lambda row: int(row["grid_size"]),
-            )
-            ax.plot(
-                [int(row["grid_size"]) for row in variant_rows],
-                [float(row[metric]) for row in variant_rows],
-                marker="o",
-                linewidth=1.8,
-                label=VARIANT_LABELS[variant],
-            )
+            grid_sizes, metric_values = _metric_series(rows, variant, metric)
+            if not grid_sizes:
+                continue
+            ax.plot(grid_sizes, metric_values, marker="o", linewidth=1.8, label=VARIANT_LABELS[variant])
         ax.set_xlabel("Number of quaternion grid cells")
         ax.set_ylabel(ylabel)
         ax.grid(True, alpha=0.3)
         ax.legend()
         paths.append(save_figure(fig, output_dir, filename))
     return paths
+
+
+def _metric_series(
+    rows: list[dict[str, float | int | str]],
+    variant: str,
+    metric: str,
+) -> tuple[list[int], list[float]]:
+    ordered_rows = sorted(
+        (row for row in rows if row["variant"] == variant),
+        key=lambda row: int(row["grid_size"]),
+    )
+    return [int(row["grid_size"]) for row in ordered_rows], [float(row[metric]) for row in ordered_rows]
