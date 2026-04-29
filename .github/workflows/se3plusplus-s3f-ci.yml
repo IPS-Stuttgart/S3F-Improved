@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   tests-and-smoke:
-    name: Tests + WP1 smoke (py${{ matrix.python-version }})
+    name: Tests + S3F smoke (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -65,23 +65,23 @@ jobs:
             --junitxml=test-results/junit-py${{ matrix.python-version }}.xml \
             tests
 
-      - name: Run WP1 CLI smoke experiment
+      - name: Run relaxed S3F CLI smoke experiment
         run: |
           python -m se3plusplus_s3f.cli \
-            wp1-relaxed-s3f \
+            relaxed-s3f \
             --grid-sizes 8 \
             --trials 1 \
             --steps 2 \
             --no-plots \
-            --output-dir ci_smoke/wp1_s1_r2_relaxed_s3f
+            --output-dir ci_smoke/relaxed_s3f_pilot
 
-      - name: Validate WP1 smoke outputs
+      - name: Validate relaxed S3F smoke outputs
         run: |
           python - <<'PY'
           import csv
           from pathlib import Path
 
-          output_dir = Path("ci_smoke/wp1_s1_r2_relaxed_s3f")
+          output_dir = Path("ci_smoke/relaxed_s3f_pilot")
           metrics_path = output_dir / "relaxed_s3f_metrics.csv"
           metadata_path = output_dir / "run_metadata.json"
           note_path = output_dir / "relaxed_s3f_pilot_note.md"
@@ -103,13 +103,13 @@ jobs:
         if: matrix.python-version == '3.11'
         run: |
           python -m se3plusplus_s3f.cli \
-            wp1-highres-reference \
+            highres-reference \
             --grid-sizes 8 \
             --reference-grid-size 16 \
             --trials 1 \
             --steps 2 \
             --no-plots \
-            --output-dir ci_smoke/wp1_s1_r2_highres_reference
+            --output-dir ci_smoke/highres_reference
 
       - name: Validate high-resolution reference smoke outputs
         if: matrix.python-version == '3.11'
@@ -118,7 +118,7 @@ jobs:
           import csv
           from pathlib import Path
 
-          output_dir = Path("ci_smoke/wp1_s1_r2_highres_reference")
+          output_dir = Path("ci_smoke/highres_reference")
           metrics_path = output_dir / "highres_reference_metrics.csv"
           metadata_path = output_dir / "run_metadata.json"
           note_path = output_dir / "highres_reference_note.md"
@@ -148,14 +148,14 @@ jobs:
           name: junit-py${{ matrix.python-version }}
           path: test-results/junit-py${{ matrix.python-version }}.xml
 
-      - name: Upload WP1 smoke artifact
+      - name: Upload S3F smoke artifact
         if: matrix.python-version == '3.11'
         uses: actions/upload-artifact@v4
         with:
-          name: se3plusplus-s3f-wp1-smoke
+          name: se3plusplus-s3f-smoke
           path: |
-            ci_smoke/wp1_s1_r2_relaxed_s3f
-            ci_smoke/wp1_s1_r2_highres_reference
+            ci_smoke/relaxed_s3f_pilot
+            ci_smoke/highres_reference
 
   package-smoke:
     name: Build package and run CLI entry point
@@ -184,13 +184,13 @@ jobs:
         run: |
           se3plusplus-s3f --help > /dev/null
           se3plusplus-s3f \
-            wp1-relaxed-s3f \
-            --config configs/wp1_relaxed_s3f_pilot.json \
+            relaxed-s3f \
+            --config configs/relaxed_s3f_pilot.json \
             --grid-sizes 8 \
             --trials 1 \
             --steps 2 \
             --no-plots \
-            --output-dir package_smoke/wp1_s1_r2_relaxed_s3f
+            --output-dir package_smoke/relaxed_s3f_pilot
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4

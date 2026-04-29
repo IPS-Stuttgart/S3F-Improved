@@ -1,4 +1,4 @@
-"""Reproduce the committed WP1 relaxed-S3F pilot outputs."""
+"""Reproduce the relaxed-S3F pilot outputs."""
 
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from se3plusplus_s3f.wp1.relaxed_s3f_pilot import load_pilot_config, write_relaxed_s3f_pilot_outputs  # noqa: E402
+from se3plusplus_s3f.s1r2.relaxed_s3f_pilot import load_pilot_config, write_relaxed_s3f_pilot_outputs  # noqa: E402
 
 
-DEFAULT_CONFIG = REPO_ROOT / "configs" / "wp1_relaxed_s3f_pilot.json"
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "results" / "wp1_s1_r2_relaxed_s3f"
+DEFAULT_CONFIG = REPO_ROOT / "configs" / "relaxed_s3f_pilot.json"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "results" / "relaxed_s3f_pilot"
 
 
 def main() -> None:

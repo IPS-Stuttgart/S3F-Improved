@@ -74,7 +74,7 @@ jobs:
       - name: Run EuRoC planar relaxed S3F smoke
         run: |
           python -m se3plusplus_s3f.cli \
-            wp1-euroc-planar \
+            euroc-planar \
             --groundtruth-path "${EUROC_MH01_PATH}" \
             --grid-size 16 \
             --stride 20 \

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy.testing as npt
 
-from se3plusplus_s3f.wp1.relaxed_s3f_pilot import (
+from se3plusplus_s3f.s1r2.relaxed_s3f_pilot import (
     PilotConfig,
     load_pilot_config,
     run_relaxed_s3f_pilot,
@@ -33,14 +33,14 @@ def test_pilot_runner_smoke(tmp_path):
     assert outputs["metadata"].exists()
 
     metadata = json.loads(outputs["metadata"].read_text(encoding="utf-8"))
-    assert metadata["experiment"] == "wp1_s1_r2_relaxed_s3f"
+    assert metadata["experiment"] == "relaxed_s3f_pilot"
     assert metadata["config"]["grid_sizes"] == [8]
     assert metadata["metrics_rows"] == 3
 
 
-def test_wp1_reference_metrics_match_committed_reference():
-    config = load_pilot_config(REFERENCE_DIR / "wp1_relaxed_s3f_regression_config.json")
-    with (REFERENCE_DIR / "wp1_relaxed_s3f_regression_metrics.csv").open(newline="", encoding="utf-8") as file:
+def test_reference_metrics_match_committed_reference():
+    config = load_pilot_config(REFERENCE_DIR / "relaxed_s3f_regression_config.json")
+    with (REFERENCE_DIR / "relaxed_s3f_regression_metrics.csv").open(newline="", encoding="utf-8") as file:
         expected_rows = list(csv.DictReader(file))
     actual_rows = run_relaxed_s3f_pilot(config)
 

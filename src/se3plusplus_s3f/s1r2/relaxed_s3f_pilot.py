@@ -1,4 +1,4 @@
-"""Synthetic WP1 benchmark for relaxed S3F on S1 x R2."""
+"""Synthetic benchmark for relaxed S3F on S1 x R2."""
 
 from __future__ import annotations
 
@@ -138,7 +138,7 @@ def run_relaxed_s3f_pilot(config: PilotConfig = PilotConfig()) -> list[dict[str,
 
 
 def generate_pilot_trials(config: PilotConfig) -> list[dict[str, np.ndarray | float]]:
-    """Generate deterministic synthetic trials for the WP1 pilot config."""
+    """Generate deterministic synthetic trials for the pilot config."""
 
     return _generate_trials(config)
 
@@ -285,7 +285,7 @@ def _write_csv(path: Path, rows: list[dict[str, float | int | str]]) -> None:
 
 def _write_metadata(path: Path, rows: list[dict[str, float | int | str]], config: PilotConfig) -> None:
     content = {
-        "experiment": "wp1_s1_r2_relaxed_s3f",
+        "experiment": "relaxed_s3f_pilot",
         "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "config": pilot_config_to_dict(config),
         "metrics_schema": METRIC_FIELDNAMES,
@@ -361,7 +361,7 @@ coverage `{float(best_coverage["coverage_95"]):.3f}` and mean NEES
 
 ## Interpretation
 
-This pilot tests the WP1 claim that replacing representative-cell motion by
+This pilot tests whether replacing representative-cell motion by
 cell-averaged motion and adding within-cell covariance can reduce coarse-grid
 artifacts in the S3F model problem. It is intentionally limited to S1 x R2 and
 synthetic data. It does not yet validate S3+, SE(3)+, adaptive grids, or

@@ -6,14 +6,14 @@ import argparse
 from dataclasses import replace
 from pathlib import Path
 
-from .wp1.euroc_planar import EuRoCPlanarConfig, write_euroc_planar_outputs
-from .wp1.highres_reference import HighResReferenceConfig, write_highres_reference_outputs
-from .wp1.relaxed_s3f_pilot import PilotConfig, load_pilot_config, write_relaxed_s3f_pilot_outputs
+from .s1r2.euroc_planar import EuRoCPlanarConfig, write_euroc_planar_outputs
+from .s1r2.highres_reference import HighResReferenceConfig, write_highres_reference_outputs
+from .s1r2.relaxed_s3f_pilot import PilotConfig, load_pilot_config, write_relaxed_s3f_pilot_outputs
 
 
 def main() -> None:
     args = _parse_args()
-    if args.command == "wp1-relaxed-s3f":
+    if args.command == "relaxed-s3f":
         base_config = load_pilot_config(args.config) if args.config is not None else PilotConfig()
         config = replace(
             base_config,
@@ -31,7 +31,7 @@ def main() -> None:
             print(f"Wrote {label}: {path}")
         return
 
-    if args.command == "wp1-highres-reference":
+    if args.command == "highres-reference":
         config = HighResReferenceConfig(
             pilot=PilotConfig(
                 grid_sizes=tuple(args.grid_sizes),
@@ -50,7 +50,7 @@ def main() -> None:
             print(f"Wrote {label}: {path}")
         return
 
-    if args.command == "wp1-euroc-planar":
+    if args.command == "euroc-planar":
         config = EuRoCPlanarConfig(
             grid_size=args.grid_size,
             start_index=args.start_index,
@@ -78,30 +78,30 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    wp1 = subparsers.add_parser(
-        "wp1-relaxed-s3f",
-        help="Run the WP1 S1 x R2 relaxed S3F pilot benchmark.",
+    relaxed = subparsers.add_parser(
+        "relaxed-s3f",
+        help="Run the S1 x R2 relaxed S3F pilot benchmark.",
     )
-    wp1.add_argument("--config", type=Path, help="JSON config file for the pilot benchmark.")
-    wp1.add_argument(
+    relaxed.add_argument("--config", type=Path, help="JSON config file for the pilot benchmark.")
+    relaxed.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("results") / "wp1_s1_r2_relaxed_s3f",
+        default=Path("results") / "relaxed_s3f_pilot",
     )
-    wp1.add_argument("--grid-sizes", type=int, nargs="+")
-    wp1.add_argument("--trials", type=int)
-    wp1.add_argument("--steps", type=int)
-    wp1.add_argument("--seed", type=int)
-    wp1.add_argument("--no-plots", action="store_true")
+    relaxed.add_argument("--grid-sizes", type=int, nargs="+")
+    relaxed.add_argument("--trials", type=int)
+    relaxed.add_argument("--steps", type=int)
+    relaxed.add_argument("--seed", type=int)
+    relaxed.add_argument("--no-plots", action="store_true")
 
     highres = subparsers.add_parser(
-        "wp1-highres-reference",
+        "highres-reference",
         help="Compare coarse relaxed S3F variants against a high-resolution S3F reference.",
     )
     highres.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("results") / "wp1_s1_r2_highres_reference",
+        default=Path("results") / "highres_reference",
     )
     highres.add_argument("--grid-sizes", type=int, nargs="+", default=[8, 16, 32, 64])
     highres.add_argument("--reference-grid-size", type=int, default=256)
@@ -111,14 +111,14 @@ def _parse_args() -> argparse.Namespace:
     highres.add_argument("--no-plots", action="store_true")
 
     euroc = subparsers.add_parser(
-        "wp1-euroc-planar",
+        "euroc-planar",
         help="Run a planar relaxed S3F smoke test on EuRoC ground truth.",
     )
     euroc.add_argument("--groundtruth-path", type=Path, required=True)
     euroc.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("results") / "wp1_euroc_planar",
+        default=Path("results") / "euroc_planar",
     )
     euroc.add_argument("--grid-size", type=int, default=16)
     euroc.add_argument("--start-index", type=int, default=0)
