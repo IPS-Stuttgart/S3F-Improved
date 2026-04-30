@@ -9,6 +9,7 @@ from .s1r2.runtime_profile import RuntimeProfileConfig, run_s3f_runtime_profile
 from .s3r3.evidence_summary import S3R3EvidenceSummaryConfig, S3R3EvidenceSummaryResult, run_s3r3_evidence_summary
 from .s3r3.highres_reference import S3R3HighResReferenceConfig, run_s3r3_highres_reference_benchmark
 from .s3r3.relaxed_s3f_prototype import S3R3PrototypeConfig, run_s3r3_relaxed_prototype
+from .s3r3.stress_sweep import S3R3StressSweepConfig, S3R3StressSweepResult, run_s3r3_stress_sweep
 
 __all__ = [
     "BaselineComparisonConfig",
@@ -23,6 +24,8 @@ __all__ = [
     "S3R3EvidenceSummaryResult",
     "S3R3HighResReferenceConfig",
     "S3R3PrototypeConfig",
+    "S3R3StressSweepConfig",
+    "S3R3StressSweepResult",
     "load_pilot_config",
     "run_baseline_comparison",
     "run_euroc_planar_relaxed_s3f",
@@ -33,5 +36,6 @@ __all__ = [
     "run_s3r3_evidence_summary",
     "run_s3r3_highres_reference_benchmark",
     "run_s3r3_relaxed_prototype",
+    "run_s3r3_stress_sweep",
     "run_s3f_runtime_profile",
 ]
