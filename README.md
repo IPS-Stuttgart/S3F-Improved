@@ -131,6 +131,17 @@ This writes outputs to `results/s3r3_relaxed/`. For a reproducible runner-side
 report without committing generated files, use the manual GitHub Actions
 workflow `S3R3 Relaxed Report`.
 
+## Compare S3R3 Against a High-Resolution Reference
+
+To test whether coarse S3R3 relaxed propagation follows a denser S3F reference:
+
+```bash
+se3plusplus-s3f s3r3-highres-reference
+```
+
+This writes outputs to `results/s3r3_highres_reference/`. The reference is a
+denser baseline S3F quaternion grid, not an external filter.
+
 ## Profile S3F Runtime
 
 To split relaxed S3F runtime into likelihood construction, cell-statistics,

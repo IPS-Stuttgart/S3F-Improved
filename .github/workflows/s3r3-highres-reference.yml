@@ -1,0 +1,185 @@
+name: S3R3 High-Resolution Reference
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      grid_sizes:
+        description: Space-separated coarse quaternion grid sizes.
+        required: true
+        default: "8 16 32"
+        type: string
+      reference_grid_size:
+        description: Denser baseline S3F reference grid size.
+        required: true
+        default: 64
+        type: number
+      trials:
+        description: Synthetic trials used for each comparison row.
+        required: true
+        default: 8
+        type: number
+      steps:
+        description: Prediction/update steps in each trial.
+        required: true
+        default: 8
+        type: number
+      seed:
+        description: Random seed for synthetic trial generation.
+        required: true
+        default: 29
+        type: number
+      cell_sample_count:
+        description: Local tangent samples used for each quaternion cell.
+        required: true
+        default: 27
+        type: number
+      retention_days:
+        description: Days to retain the uploaded report artifact.
+        required: true
+        default: 30
+        type: number
+
+concurrency:
+  group: s3r3-highres-reference-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  s3r3-highres-reference:
+    name: Build S3R3 high-resolution reference report
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      GRID_SIZES: ${{ inputs.grid_sizes }}
+      REFERENCE_GRID_SIZE: ${{ inputs.reference_grid_size }}
+      TRIALS: ${{ inputs.trials }}
+      STEPS: ${{ inputs.steps }}
+      SEED: ${{ inputs.seed }}
+      CELL_SAMPLE_COUNT: ${{ inputs.cell_sample_count }}
+      OUTPUT_DIR: results/s3r3_highres_reference
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run S3R3 high-resolution reference report
+        shell: bash
+        run: |
+          read -r -a grid_sizes <<< "$GRID_SIZES"
+          if [[ ${#grid_sizes[@]} -eq 0 ]]; then
+            echo "At least one grid size is required." >&2
+            exit 1
+          fi
+          max_grid_size=0
+          for value in "${grid_sizes[@]}"; do
+            if ! [[ "$value" =~ ^[0-9]+$ ]] || [[ "$value" -le 0 ]]; then
+              echo "Grid sizes must be positive integers: $GRID_SIZES" >&2
+              exit 1
+            fi
+            if [[ "$value" -gt "$max_grid_size" ]]; then
+              max_grid_size="$value"
+            fi
+          done
+          if ! [[ "$REFERENCE_GRID_SIZE" =~ ^[0-9]+$ ]] || [[ "$REFERENCE_GRID_SIZE" -le "$max_grid_size" ]]; then
+            echo "Reference grid size must be greater than every coarse grid size." >&2
+            exit 1
+          fi
+
+          python -m se3plusplus_s3f.cli \
+            s3r3-highres-reference \
+            --grid-sizes "${grid_sizes[@]}" \
+            --reference-grid-size "$REFERENCE_GRID_SIZE" \
+            --trials "$TRIALS" \
+            --steps "$STEPS" \
+            --seed "$SEED" \
+            --cell-sample-count "$CELL_SAMPLE_COUNT" \
+            --output-dir "$OUTPUT_DIR"
+
+      - name: Validate S3R3 high-resolution reference outputs
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          import math
+          import os
+          from pathlib import Path
+
+          output_dir = Path(os.environ["OUTPUT_DIR"])
+          metrics_path = output_dir / "s3r3_highres_reference_metrics.csv"
+          metadata_path = output_dir / "run_metadata.json"
+          note_path = output_dir / "s3r3_highres_reference_note.md"
+          plot_paths = [
+              output_dir / "s3r3_position_rmse_to_reference.png",
+              output_dir / "s3r3_orientation_mode_error_to_reference.png",
+              output_dir / "s3r3_runtime_ratio_to_reference.png",
+          ]
+          for path in (metrics_path, metadata_path, note_path, *plot_paths):
+              if not path.exists():
+                  raise FileNotFoundError(path)
+
+          rows = list(csv.DictReader(metrics_path.open(newline="", encoding="utf-8")))
+          grid_sizes = os.environ["GRID_SIZES"].split()
+          expected_rows = 3 * len(grid_sizes)
+          if len(rows) != expected_rows:
+              raise AssertionError(f"Expected {expected_rows} rows, found {len(rows)}.")
+          for row in rows:
+              if row["variant"] not in {"baseline", "r1", "r1_r2"}:
+                  raise AssertionError(row)
+              if int(row["reference_grid_size"]) != int(os.environ["REFERENCE_GRID_SIZE"]):
+                  raise AssertionError(row)
+              if int(row["cell_sample_count"]) != int(os.environ["CELL_SAMPLE_COUNT"]):
+                  raise AssertionError(row)
+              if not 0.0 <= float(row["coverage_95_to_truth"]) <= 1.0:
+                  raise AssertionError(row)
+              for column in (
+                  "position_rmse_to_reference",
+                  "orientation_mode_error_to_reference_rad",
+                  "position_rmse_to_truth",
+                  "mean_nees_to_truth",
+                  "runtime_ms_per_step",
+                  "runtime_ratio_to_reference",
+              ):
+                  if not math.isfinite(float(row[column])):
+                      raise AssertionError(row)
+
+          metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+          if metadata["experiment"] != "s3r3_highres_reference":
+              raise AssertionError(metadata)
+          if metadata["metrics_rows"] != len(rows):
+              raise AssertionError(metadata)
+          if metadata["config"]["reference_grid_size"] != int(os.environ["REFERENCE_GRID_SIZE"]):
+              raise AssertionError(metadata)
+
+          print(f"Validated {len(rows)} S3R3 high-resolution reference rows.")
+          PY
+
+      - name: Write report summary
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          note = Path(os.environ["OUTPUT_DIR"]) / "s3r3_highres_reference_note.md"
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(note.read_text(encoding="utf-8"), encoding="utf-8")
+          PY
+
+      - name: Upload S3R3 high-resolution reference artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: s3r3-highres-reference-${{ github.run_number }}
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}

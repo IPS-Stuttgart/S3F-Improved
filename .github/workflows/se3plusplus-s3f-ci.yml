@@ -226,6 +226,50 @@ jobs:
           print("S3R3 relaxed rows:", rows)
           PY
 
+      - name: Run S3R3 high-resolution reference CLI smoke
+        if: matrix.python-version == '3.11'
+        run: |
+          python -m se3plusplus_s3f.cli \
+            s3r3-highres-reference \
+            --grid-sizes 8 \
+            --reference-grid-size 16 \
+            --trials 1 \
+            --steps 2 \
+            --no-plots \
+            --output-dir ci_smoke/s3r3_highres_reference
+
+      - name: Validate S3R3 high-resolution reference smoke outputs
+        if: matrix.python-version == '3.11'
+        run: |
+          python - <<'PY'
+          import csv
+          import math
+          from pathlib import Path
+
+          required = {
+              "metrics": Path("ci_smoke/s3r3_highres_reference/s3r3_highres_reference_metrics.csv"),
+              "metadata": Path("ci_smoke/s3r3_highres_reference/run_metadata.json"),
+              "note": Path("ci_smoke/s3r3_highres_reference/s3r3_highres_reference_note.md"),
+          }
+          missing = [label for label, path in required.items() if not path.exists()]
+          if missing:
+              raise FileNotFoundError(missing)
+
+          rows = list(csv.DictReader(required["metrics"].open(newline="", encoding="utf-8")))
+          if len(rows) != 3:
+              raise AssertionError(rows)
+          if sorted(row["variant"] for row in rows) != ["baseline", "r1", "r1_r2"]:
+              raise AssertionError(rows)
+          for row in rows:
+              assert row["grid_size"] == "8", row
+              assert row["reference_grid_size"] == "16", row
+              assert math.isfinite(float(row["position_rmse_to_reference"])), row
+              assert math.isfinite(float(row["orientation_mode_error_to_reference_rad"])), row
+              assert float(row["runtime_ms_per_step"]) > 0.0, row
+
+          print("S3R3 high-resolution reference rows:", rows)
+          PY
+
       - name: Upload JUnit results
         if: always()
         uses: actions/upload-artifact@v7
@@ -243,6 +287,7 @@ jobs:
             ci_smoke/highres_reference
             ci_smoke/baseline_comparison
             ci_smoke/s3r3_relaxed
+            ci_smoke/s3r3_highres_reference
 
   package-smoke:
     name: Build package and run CLI entry point

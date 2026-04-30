@@ -91,7 +91,7 @@ def s3r3_prototype_config_to_dict(config: S3R3PrototypeConfig) -> dict[str, Any]
 def run_s3r3_relaxed_prototype(config: S3R3PrototypeConfig = S3R3PrototypeConfig()) -> list[dict[str, float | int | str]]:
     """Run the S3+ x R3 relaxed-S3F prototype and return one metrics row per variant/grid."""
 
-    trials = _generate_trials(config)
+    trials = generate_s3r3_trials(config)
     rows: list[dict[str, float | int | str]] = []
     for grid_size in config.grid_sizes:
         for variant in config.variants:
@@ -151,6 +151,12 @@ def make_s3r3_filter(config: S3R3PrototypeConfig, grid_size: int) -> StateSpaceS
         for _ in range(grid.shape[0])
     ]
     return StateSpaceSubdivisionFilter(StateSpaceSubdivisionGaussianDistribution(gd, gaussians))
+
+
+def generate_s3r3_trials(config: S3R3PrototypeConfig) -> list[dict[str, np.ndarray]]:
+    """Generate reproducible synthetic S3+ x R3 tracking trials."""
+
+    return _generate_trials(config)
 
 
 def s3r3_cell_statistics(
@@ -229,6 +235,33 @@ def predict_s3r3_relaxed(
         linear_input_vectors=displacements.T,
     )
     return stats
+
+
+def s3r3_linear_position_mean(filter_: StateSpaceSubdivisionFilter) -> np.ndarray:
+    """Return the current R3 position mean for an S3+ x R3 S3F state."""
+
+    return np.asarray(filter_.filter_state.linear_mean(), dtype=float)
+
+
+def s3r3_linear_position_error_stats(filter_: StateSpaceSubdivisionFilter, true_position: np.ndarray) -> tuple[np.ndarray, float]:
+    """Return R3 position error and NEES for an S3+ x R3 S3F state."""
+
+    return _linear_position_error_stats(filter_, true_position)
+
+
+def s3r3_orientation_mode(filter_: StateSpaceSubdivisionFilter) -> np.ndarray:
+    """Return the modal quaternion grid point for an S3+ x R3 S3F state."""
+
+    state = filter_.filter_state
+    weights = np.asarray(state.gd.grid_values, dtype=float)
+    grid = _canonical_quaternions(np.asarray(state.gd.get_grid(), dtype=float))
+    return grid[int(np.argmax(weights))]
+
+
+def s3r3_orientation_distance(left: np.ndarray, right: np.ndarray) -> float:
+    """Return the antipodal-invariant geodesic distance between two S3+ quaternions."""
+
+    return _geodesic_distance(left, right)
 
 
 def _run_variant(
@@ -375,11 +408,7 @@ def _quadratic_form(vector: np.ndarray, matrix: np.ndarray) -> float:
 
 
 def _orientation_mode_error(filter_: StateSpaceSubdivisionFilter, true_orientation: np.ndarray) -> float:
-    state = filter_.filter_state
-    weights = np.asarray(state.gd.grid_values, dtype=float)
-    grid = _canonical_quaternions(np.asarray(state.gd.get_grid(), dtype=float))
-    mode = grid[int(np.argmax(weights))]
-    return _geodesic_distance(mode, true_orientation)
+    return s3r3_orientation_distance(s3r3_orientation_mode(filter_), true_orientation)
 
 
 def _canonical_quaternions(quaternions: np.ndarray) -> np.ndarray:

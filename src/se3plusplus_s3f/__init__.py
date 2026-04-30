@@ -6,6 +6,7 @@ from .s1r2.euroc_planar import EuRoCPlanarConfig, run_euroc_planar_relaxed_s3f
 from .s1r2.highres_reference import HighResReferenceConfig, run_highres_reference_benchmark
 from .s1r2.quality_cost import QualityCostConfig, QualityCostResult, run_quality_cost_report
 from .s1r2.runtime_profile import RuntimeProfileConfig, run_s3f_runtime_profile
+from .s3r3.highres_reference import S3R3HighResReferenceConfig, run_s3r3_highres_reference_benchmark
 from .s3r3.relaxed_s3f_prototype import S3R3PrototypeConfig, run_s3r3_relaxed_prototype
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
     "QualityCostConfig",
     "QualityCostResult",
     "RuntimeProfileConfig",
+    "S3R3HighResReferenceConfig",
     "S3R3PrototypeConfig",
     "load_pilot_config",
     "run_baseline_comparison",
@@ -25,6 +27,7 @@ __all__ = [
     "run_particle_sensitivity",
     "run_quality_cost_report",
     "run_relaxed_s3f_pilot",
+    "run_s3r3_highres_reference_benchmark",
     "run_s3r3_relaxed_prototype",
     "run_s3f_runtime_profile",
 ]
