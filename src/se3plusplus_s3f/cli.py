@@ -20,6 +20,7 @@ from .s1r2.runtime_profile import RuntimeProfileConfig, write_s3f_runtime_profil
 from .s3r3.evidence_summary import S3R3EvidenceSummaryConfig, write_s3r3_evidence_summary_outputs
 from .s3r3.highres_reference import S3R3HighResReferenceConfig, write_s3r3_highres_reference_outputs
 from .s3r3.relaxed_s3f_prototype import S3R3PrototypeConfig, write_s3r3_relaxed_outputs
+from .s3r3.stress_sweep import S3R3StressSweepConfig, write_s3r3_stress_sweep_outputs
 
 
 def main() -> None:
@@ -224,6 +225,27 @@ def main() -> None:
             print(f"Wrote {label}: {path}")
         return
 
+    if args.command == "s3r3-stress-sweep":
+        config = S3R3StressSweepConfig(
+            prototype=S3R3PrototypeConfig(
+                grid_sizes=tuple(args.grid_sizes),
+                n_trials=args.trials,
+                n_steps=args.steps,
+                seed=args.seed,
+                cell_sample_count=args.cell_sample_count,
+            ),
+            prior_kappas=tuple(args.prior_kappas),
+            body_increment_scales=tuple(args.body_increment_scales),
+        )
+        outputs = write_s3r3_stress_sweep_outputs(
+            output_dir=args.output_dir,
+            config=config,
+            write_plots=not args.no_plots,
+        )
+        for label, path in outputs.items():
+            print(f"Wrote {label}: {path}")
+        return
+
     raise ValueError(f"Unknown command {args.command!r}.")
 
 
@@ -402,6 +424,24 @@ def _parse_args() -> argparse.Namespace:
     s3r3_evidence.add_argument("--seed", type=int, default=29)
     s3r3_evidence.add_argument("--cell-sample-count", type=int, default=27)
     s3r3_evidence.add_argument("--no-plots", action="store_true")
+
+    s3r3_stress = subparsers.add_parser(
+        "s3r3-stress-sweep",
+        help="Sweep S3+ x R3 relaxed S3F over orientation width and displacement size.",
+    )
+    s3r3_stress.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("results") / "s3r3_stress_sweep",
+    )
+    s3r3_stress.add_argument("--grid-sizes", type=int, nargs="+", default=[8, 16, 32])
+    s3r3_stress.add_argument("--prior-kappas", type=float, nargs="+", default=[1.5, 3.0, 8.0], help="Orientation-prior kappas; lower is broader.")
+    s3r3_stress.add_argument("--body-increment-scales", type=float, nargs="+", default=[0.5, 1.0, 1.5])
+    s3r3_stress.add_argument("--trials", type=int, default=4)
+    s3r3_stress.add_argument("--steps", type=int, default=5)
+    s3r3_stress.add_argument("--seed", type=int, default=31)
+    s3r3_stress.add_argument("--cell-sample-count", type=int, default=27)
+    s3r3_stress.add_argument("--no-plots", action="store_true")
     return parser.parse_args()
 
 

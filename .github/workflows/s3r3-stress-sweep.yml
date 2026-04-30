@@ -1,0 +1,185 @@
+name: S3R3 Stress Sweep
+
+permissions:
+  contents: read
+
+# jscpd:ignore-start
+on:
+  workflow_dispatch:
+    inputs:
+      grid_sizes:
+        description: Space-separated quaternion grid sizes.
+        required: true
+        default: "8 16 32"
+        type: string
+      prior_kappas:
+        description: Space-separated orientation-prior kappas; lower is broader.
+        required: true
+        default: "1.5 3.0 8.0"
+        type: string
+      body_increment_scales:
+        description: Space-separated body-frame displacement scales.
+        required: true
+        default: "0.5 1.0 1.5"
+        type: string
+      trials:
+        description: Synthetic trials used for each stress scenario.
+        required: true
+        default: 4
+        type: number
+      steps:
+        description: Prediction/update steps in each trial.
+        required: true
+        default: 5
+        type: number
+      seed:
+        description: Base random seed for synthetic trial generation.
+        required: true
+        default: 31
+        type: number
+      cell_sample_count:
+        description: Local tangent samples used for each quaternion cell.
+        required: true
+        default: 27
+        type: number
+      retention_days:
+        description: Days to retain the uploaded report artifact.
+        required: true
+        default: 30
+        type: number
+# jscpd:ignore-end
+
+concurrency:
+  group: s3r3-stress-sweep-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  s3r3-stress-sweep:
+    name: Build S3R3 stress sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      GRID_SIZES: ${{ inputs.grid_sizes }}
+      PRIOR_KAPPAS: ${{ inputs.prior_kappas }}
+      BODY_INCREMENT_SCALES: ${{ inputs.body_increment_scales }}
+      TRIALS: ${{ inputs.trials }}
+      STEPS: ${{ inputs.steps }}
+      SEED: ${{ inputs.seed }}
+      CELL_SAMPLE_COUNT: ${{ inputs.cell_sample_count }}
+      OUTPUT_DIR: results/s3r3_stress_sweep
+
+    steps:
+      # jscpd:ignore-start
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      # jscpd:ignore-end
+      - name: Run and validate stress sweep
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          import math
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          def positive_int_list(name):
+              values = [int(token) for token in os.environ[name].split()]
+              if not values or min(values) <= 0:
+                  raise ValueError(f"{name} must contain positive integers.")
+              return values
+
+          def positive_float_list(name):
+              values = [float(token) for token in os.environ[name].split()]
+              if not values or min(values) <= 0.0:
+                  raise ValueError(f"{name} must contain positive values.")
+              return values
+
+          grid_sizes = positive_int_list("GRID_SIZES")
+          prior_kappas = positive_float_list("PRIOR_KAPPAS")
+          body_increment_scales = positive_float_list("BODY_INCREMENT_SCALES")
+          for scalar_name in ("TRIALS", "STEPS", "SEED", "CELL_SAMPLE_COUNT"):
+              int(os.environ[scalar_name])
+
+          command = [sys.executable, "-m", "se3plusplus_s3f.cli", "s3r3-stress-sweep"]
+          command.extend(["--grid-sizes", *(str(value) for value in grid_sizes)])
+          command.extend(["--prior-kappas", *(str(value) for value in prior_kappas)])
+          command.extend(["--body-increment-scales", *(str(value) for value in body_increment_scales)])
+          command.extend(["--trials", os.environ["TRIALS"], "--steps", os.environ["STEPS"]])
+          command.extend(["--seed", os.environ["SEED"], "--cell-sample-count", os.environ["CELL_SAMPLE_COUNT"]])
+          command.extend(["--output-dir", os.environ["OUTPUT_DIR"]])
+          subprocess.run(command, check=True)
+
+          output_dir = Path(os.environ["OUTPUT_DIR"])
+          files = {
+              "metrics": output_dir / "s3r3_stress_sweep_metrics.csv",
+              "claims": output_dir / "s3r3_stress_sweep_claims.csv",
+              "summary": output_dir / "s3r3_stress_sweep_summary.csv",
+              "metadata": output_dir / "run_metadata.json",
+              "note": output_dir / "s3r3_stress_sweep_note.md",
+              "gain_grid_plot": output_dir / "s3r3_stress_rmse_gain_by_grid.png",
+              "gain_heatmap": output_dir / "s3r3_stress_mean_rmse_gain.png",
+              "nees_heatmap": output_dir / "s3r3_stress_mean_nees_ratio.png",
+          }
+          missing = [name for name, path in files.items() if not path.exists()]
+          if missing:
+              raise FileNotFoundError(missing)
+
+          scenario_count = len(prior_kappas) * len(body_increment_scales)
+          expected_metrics = scenario_count * len(grid_sizes) * 3
+          expected_claims = scenario_count * len(grid_sizes) * 2
+          metrics_rows = list(csv.DictReader(files["metrics"].open(newline="", encoding="utf-8")))
+          claim_rows = list(csv.DictReader(files["claims"].open(newline="", encoding="utf-8")))
+          summary_rows = list(csv.DictReader(files["summary"].open(newline="", encoding="utf-8")))
+          if len(metrics_rows) != expected_metrics:
+              raise AssertionError((len(metrics_rows), expected_metrics))
+          if len(claim_rows) != expected_claims:
+              raise AssertionError((len(claim_rows), expected_claims))
+          if len(summary_rows) != scenario_count:
+              raise AssertionError((len(summary_rows), scenario_count))
+
+          for row in claim_rows:
+              if row["candidate_variant"] != "r1_r2":
+                  raise AssertionError(row)
+              for column in ("position_rmse_ratio", "mean_nees_ratio", "runtime_ratio"):
+                  if not math.isfinite(float(row[column])):
+                      raise AssertionError(row)
+
+          metadata = json.loads(files["metadata"].read_text(encoding="utf-8"))
+          if metadata["experiment"] != "s3r3_stress_sweep":
+              raise AssertionError(metadata)
+          if metadata["claims_rows"] != len(claim_rows):
+              raise AssertionError(metadata)
+
+          print(f"Validated {len(metrics_rows)} metric rows and {len(claim_rows)} claim rows.")
+          PY
+
+      - name: Write report summary
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          note = Path(os.environ["OUTPUT_DIR"]) / "s3r3_stress_sweep_note.md"
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(note.read_text(encoding="utf-8"), encoding="utf-8")
+          PY
+
+      - name: Upload S3R3 stress sweep artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: s3r3-stress-sweep-${{ github.run_number }}
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}

@@ -154,6 +154,18 @@ se3plusplus-s3f s3r3-evidence-summary
 This writes relaxed metrics, high-resolution reference metrics, claim rows,
 plots, metadata, and a short note to `results/s3r3_evidence_summary/`.
 
+## Sweep S3R3 Stress Conditions
+
+To map where `R1+R2` helps as orientation uncertainty and motion-induced
+translation bias change:
+
+```bash
+se3plusplus-s3f s3r3-stress-sweep
+```
+
+This writes scenario metrics, comparison claim rows, summary tables, plots,
+metadata, and a short note to `results/s3r3_stress_sweep/`.
+
 ## Profile S3F Runtime
 
 To split relaxed S3F runtime into likelihood construction, cell-statistics,
