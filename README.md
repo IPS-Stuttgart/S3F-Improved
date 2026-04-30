@@ -115,6 +115,20 @@ This writes outputs to `results/particle_sensitivity/`. For a larger run that
 keeps generated files out of git, use the manual GitHub Actions workflow
 `Particle Sensitivity Benchmark`.
 
+## Run the S3+ x R3 Prototype
+
+The first 3-D orientation prototype keeps the same S3F structure but uses a
+PyRecEst hyperhemispherical quaternion grid and one Gaussian `R3` position
+component per grid point. Its `R1` and `R1+R2` terms are estimated from
+deterministic local tangent samples around each grid quaternion, so this is a
+numerical prototype rather than an exact `S3+` cell-integral implementation.
+
+```bash
+se3plusplus-s3f s3r3-relaxed
+```
+
+This writes outputs to `results/s3r3_relaxed/`.
+
 ## Profile S3F Runtime
 
 To split relaxed S3F runtime into likelihood construction, cell-statistics,
