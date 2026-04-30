@@ -5,6 +5,7 @@ import numpy as np
 
 from se3plusplus_s3f.s3r3.relaxed_s3f_prototype import (
     S3R3PrototypeConfig,
+    _cached_s3r3_cell_statistics,
     make_s3r3_filter,
     predict_s3r3_relaxed,
     run_s3r3_relaxed_prototype,
@@ -28,6 +29,24 @@ def test_s3r3_cell_statistics_covariance_is_psd():
     for covariance in stats.covariance_inflations:
         np.testing.assert_allclose(covariance, covariance.T, atol=1e-12)
         assert np.min(np.linalg.eigvalsh(covariance)) >= -1e-12
+
+
+def test_s3r3_cell_statistics_reuses_identical_grid_cache():
+    _cached_s3r3_cell_statistics.cache_clear()
+    grid = np.array(
+        [
+            [0.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0, np.sin(0.5), np.cos(0.5)],
+        ]
+    )
+
+    stats_a = s3r3_cell_statistics(grid, np.array([0.4, 0.1, 0.2]), cell_sample_count=27)
+    stats_b = s3r3_cell_statistics(grid.copy(), np.array([0.4, 0.1, 0.2]), cell_sample_count=27)
+
+    assert stats_a is stats_b
+    cache_info = _cached_s3r3_cell_statistics.cache_info()
+    assert cache_info.misses == 1
+    assert cache_info.hits == 1
 
 
 def test_s3r3_predict_preserves_grid_masses_and_inflates_covariance():

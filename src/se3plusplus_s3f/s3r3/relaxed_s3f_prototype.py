@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -198,8 +199,33 @@ def s3r3_cell_statistics(
     if cell_sample_count <= 0:
         raise ValueError("cell_sample_count must be positive.")
 
-    grid = _canonical_quaternions(np.asarray(grid, dtype=float))
-    body_increment = np.asarray(body_increment, dtype=float).reshape(3)
+    grid = np.ascontiguousarray(_canonical_quaternions(np.asarray(grid, dtype=np.float64)))
+    body_increment = np.asarray(body_increment, dtype=np.float64).reshape(3)
+    return _cached_s3r3_cell_statistics(
+        grid.shape,
+        grid.tobytes(),
+        tuple(float(value) for value in body_increment),
+        int(cell_sample_count),
+    )
+
+
+@lru_cache(maxsize=128)
+def _cached_s3r3_cell_statistics(
+    grid_shape: tuple[int, ...],
+    grid_bytes: bytes,
+    body_increment_values: tuple[float, float, float],
+    cell_sample_count: int,
+) -> S3R3CellStatistics:
+    grid = np.frombuffer(grid_bytes, dtype=np.float64).reshape(grid_shape)
+    body_increment = np.asarray(body_increment_values, dtype=np.float64)
+    return _freeze_cell_statistics(_compute_s3r3_cell_statistics(grid, body_increment, cell_sample_count))
+
+
+def _compute_s3r3_cell_statistics(
+    grid: np.ndarray,
+    body_increment: np.ndarray,
+    cell_sample_count: int,
+) -> S3R3CellStatistics:
     cell_radius = _estimate_cell_radius(grid)
     tangent_offsets = _tangent_cell_offsets(cell_radius, cell_sample_count)
     local_quaternions = _exp_map_identity(tangent_offsets)
@@ -225,6 +251,18 @@ def s3r3_cell_statistics(
         mean_displacements=np.asarray(mean_displacements),
         covariance_inflations=np.asarray(covariance_inflations),
     )
+
+
+def _freeze_cell_statistics(stats: S3R3CellStatistics) -> S3R3CellStatistics:
+    for array in (
+        stats.grid,
+        stats.body_increment,
+        stats.representative_displacements,
+        stats.mean_displacements,
+        stats.covariance_inflations,
+    ):
+        array.setflags(write=False)
+    return stats
 
 
 def predict_s3r3_relaxed(
