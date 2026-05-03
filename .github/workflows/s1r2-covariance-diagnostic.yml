@@ -124,7 +124,81 @@ jobs:
           if metadata["metrics_rows"] != len(metric_rows) or metadata["pairwise_rows"] != len(pairwise_rows):
               raise AssertionError(metadata)
 
-          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(note.read_text(encoding="utf-8"), encoding="utf-8")
+          variant_order = ["baseline", "r1", "cov_only", "r1_r2"]
+          label = {
+              "baseline": "baseline",
+              "r1": "R1 mean",
+              "cov_only": "cov-only diagnostic",
+              "r1_r2": "R1+R2",
+          }
+          grids = sorted({int(row["grid_size"]) for row in metric_rows})
+          coarsest_grid = grids[0]
+          metrics_by_key = {(int(row["grid_size"]), row["variant"]): row for row in metric_rows}
+
+          headline_lines = [
+              "",
+              "## Headline covariance-diagnostic results",
+              "",
+              f"Coarsest grid: `{coarsest_grid}` orientation cells.",
+              "",
+              "| variant | RMSE | mean NEES | 95% coverage | runtime [ms/step] |",
+              "|---|---:|---:|---:|---:|",
+          ]
+          for variant in variant_order:
+              row = metrics_by_key[(coarsest_grid, variant)]
+              headline_lines.append(
+                  "| {label} | {rmse:.4f} | {nees:.2f} | {coverage:.3f} | {runtime:.3f} |".format(
+                      label=label[variant],
+                      rmse=float(row["position_rmse"]),
+                      nees=float(row["mean_nees"]),
+                      coverage=float(row["coverage_95"]),
+                      runtime=float(row["runtime_ms_per_step"]),
+                  )
+              )
+
+          def find_pair(candidate: str, comparator: str):
+              for row in pairwise_rows:
+                  if (
+                      int(row["grid_size"]) == coarsest_grid
+                      and row["candidate_variant"] == candidate
+                      and row["comparator_variant"] == comparator
+                  ):
+                      return row
+              return None
+
+          comparisons = [
+              ("cov_only", "baseline", "cov-only vs baseline"),
+              ("r1", "baseline", "R1 vs baseline"),
+              ("r1_r2", "cov_only", "R1+R2 vs cov-only"),
+              ("r1_r2", "baseline", "R1+R2 vs baseline"),
+          ]
+          headline_lines.extend(
+              [
+                  "",
+                  "### Coarsest-grid pairwise deltas",
+                  "",
+                  "Negative RMSE/NEES deltas are better when the comparator is overconfident.",
+                  "",
+                  "| comparison | RMSE delta | NEES delta | coverage delta |",
+                  "|---|---:|---:|---:|",
+              ]
+          )
+          for candidate, comparator, name in comparisons:
+              row = find_pair(candidate, comparator)
+              if row is None:
+                  continue
+              headline_lines.append(
+                  "| {name} | {rmse_delta:.4f} | {nees_delta:.2f} | {coverage_delta:.3f} |".format(
+                      name=name,
+                      rmse_delta=float(row["position_rmse_delta"]),
+                      nees_delta=float(row["mean_nees_delta"]),
+                      coverage_delta=float(row["coverage_delta"]),
+                  )
+              )
+
+          summary_text = note.read_text(encoding="utf-8") + "\n" + "\n".join(headline_lines) + "\n"
+          print(summary_text)
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(summary_text, encoding="utf-8")
           PY
 
       - name: Upload diagnostic artifact
