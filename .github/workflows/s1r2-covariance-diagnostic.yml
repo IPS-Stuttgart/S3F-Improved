@@ -1,0 +1,136 @@
+name: S1/R2 Covariance Diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      trials:
+        description: Synthetic trials used for each diagnostic row.
+        required: true
+        default: 32
+        type: number
+      grid_sizes:
+        description: S3F circular cell counts, separated by spaces.
+        required: true
+        default: "8 16 32 64"
+        type: string
+      steps:
+        description: Prediction/update steps in each trial.
+        required: true
+        default: 20
+        type: number
+      seed:
+        description: Random seed for shared synthetic trials.
+        required: true
+        default: 17
+        type: number
+      retention_days:
+        description: Days to retain the uploaded diagnostic artifact.
+        required: true
+        default: 30
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  covariance-diagnostic:
+    name: Run covariance-only diagnostic
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      GRID_SIZES: ${{ inputs.grid_sizes }}
+      TRIALS: ${{ inputs.trials }}
+      STEPS: ${{ inputs.steps }}
+      SEED: ${{ inputs.seed }}
+      OUTPUT_DIR: results/s1r2_covariance_diagnostic
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run diagnostic
+        shell: bash
+        run: |
+          read -r -a grid_sizes <<< "$GRID_SIZES"
+          if [[ ${#grid_sizes[@]} -eq 0 ]]; then
+            echo "At least one grid size is required." >&2
+            exit 1
+          fi
+          for value in "${grid_sizes[@]}"; do
+            if ! [[ "$value" =~ ^[0-9]+$ ]] || [[ "$value" -le 0 ]]; then
+              echo "Grid sizes must be positive integers: $GRID_SIZES" >&2
+              exit 1
+            fi
+          done
+
+          python -m se3plusplus_s3f.s1r2.covariance_diagnostic \
+            --grid-sizes "${grid_sizes[@]}" \
+            --trials "$TRIALS" \
+            --steps "$STEPS" \
+            --seed "$SEED" \
+            --output-dir "$OUTPUT_DIR"
+
+      - name: Validate diagnostic outputs
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          import math
+          import os
+          from pathlib import Path
+
+          output_dir = Path(os.environ["OUTPUT_DIR"])
+          metrics = output_dir / "covariance_diagnostic_metrics.csv"
+          pairwise = output_dir / "covariance_diagnostic_pairwise.csv"
+          metadata_path = output_dir / "run_metadata.json"
+          note = output_dir / "covariance_diagnostic_note.md"
+          missing = [path for path in (metrics, pairwise, metadata_path, note) if not path.exists()]
+          if missing:
+              raise FileNotFoundError(missing)
+
+          metric_rows = list(csv.DictReader(metrics.open(newline="", encoding="utf-8")))
+          pairwise_rows = list(csv.DictReader(pairwise.open(newline="", encoding="utf-8")))
+          grid_count = len(os.environ["GRID_SIZES"].split())
+          expected_variants = {"baseline", "r1", "cov_only", "r1_r2"}
+          if len(metric_rows) != len(expected_variants) * grid_count:
+              raise AssertionError((len(expected_variants) * grid_count, len(metric_rows)))
+          if {row["variant"] for row in metric_rows} != expected_variants:
+              raise AssertionError({row["variant"] for row in metric_rows})
+          for row in metric_rows:
+              for column in ("position_rmse", "mean_nees", "coverage_95", "runtime_ms_per_step"):
+                  if not math.isfinite(float(row[column])):
+                      raise AssertionError(row)
+          if not pairwise_rows:
+              raise AssertionError("No pairwise diagnostic rows written.")
+          for row in pairwise_rows:
+              for column in ("position_rmse_delta", "mean_nees_delta", "coverage_delta"):
+                  if not math.isfinite(float(row[column])):
+                      raise AssertionError(row)
+
+          metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+          if metadata["experiment"] != "s1r2_covariance_diagnostic":
+              raise AssertionError(metadata)
+          if metadata["metrics_rows"] != len(metric_rows) or metadata["pairwise_rows"] != len(pairwise_rows):
+              raise AssertionError(metadata)
+
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(note.read_text(encoding="utf-8"), encoding="utf-8")
+          PY
+
+      - name: Upload diagnostic artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: s1r2-covariance-diagnostic-${{ github.run_number }}
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
