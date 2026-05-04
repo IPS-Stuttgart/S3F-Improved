@@ -1,0 +1,459 @@
+name: S3R3 Sample-Convergence Benefit
+
+permissions:
+  contents: read
+
+"on":
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: Use smoke for a quick check, paper for a detailed run, or custom for manual fields.
+        required: true
+        default: smoke
+        type: choice
+        options: [smoke, paper, custom]
+      grid_sizes:
+        description: Custom quaternion grid sizes.
+        required: true
+        default: "8 16 32"
+        type: string
+      reference_grid_size:
+        description: Dense-reference grid size. Must exceed all grid sizes.
+        required: true
+        default: 64
+        type: number
+      cell_sample_counts:
+        description: Local tangent-cell sample counts / cubature resolutions.
+        required: true
+        default: "9 27 125 343"
+        type: string
+      trials:
+        description: Trials per evidence-summary run.
+        required: true
+        default: 16
+        type: number
+      steps:
+        description: Steps per trial.
+        required: true
+        default: 8
+        type: number
+      seed:
+        description: Random seed shared across cell-sample counts.
+        required: true
+        default: 29
+        type: number
+      retention_days:
+        description: Days to retain uploaded artifacts.
+        required: true
+        default: 30
+        type: number
+
+concurrency:
+  group: s3r3-sample-convergence-benefit-${{ github.ref }}-${{ inputs.preset }}
+  cancel-in-progress: false
+
+jobs:
+  s3r3-sample-convergence-benefit:
+    name: S3R3 sample-convergence benefit report
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Resolve run parameters
+        env:
+          PRESET: ${{ inputs.preset }}
+          CUSTOM_GRID_SIZES: ${{ inputs.grid_sizes }}
+          CUSTOM_REFERENCE_GRID_SIZE: ${{ inputs.reference_grid_size }}
+          CUSTOM_CELL_SAMPLE_COUNTS: ${{ inputs.cell_sample_counts }}
+          CUSTOM_TRIALS: ${{ inputs.trials }}
+          CUSTOM_STEPS: ${{ inputs.steps }}
+          CUSTOM_SEED: ${{ inputs.seed }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          def int_list(text, name):
+              values = [int(token) for token in text.split()]
+              if not values or min(values) <= 0:
+                  raise ValueError(f"{name} must contain positive integers")
+              return values
+
+          def positive_int(text, name):
+              value = int(text)
+              if value <= 0:
+                  raise ValueError(f"{name} must be positive")
+              return value
+
+          preset = os.environ["PRESET"]
+          if preset == "smoke":
+              cfg = {
+                  "grid_sizes": [8],
+                  "reference_grid_size": 16,
+                  "cell_sample_counts": [9, 27],
+                  "trials": 1,
+                  "steps": 2,
+                  "seed": 29,
+              }
+          elif preset == "paper":
+              cfg = {
+                  "grid_sizes": [8, 16, 32],
+                  "reference_grid_size": 64,
+                  "cell_sample_counts": [9, 27, 125, 343],
+                  "trials": 16,
+                  "steps": 8,
+                  "seed": 29,
+              }
+          elif preset == "custom":
+              cfg = {
+                  "grid_sizes": int_list(os.environ["CUSTOM_GRID_SIZES"], "grid_sizes"),
+                  "reference_grid_size": positive_int(os.environ["CUSTOM_REFERENCE_GRID_SIZE"], "reference_grid_size"),
+                  "cell_sample_counts": int_list(os.environ["CUSTOM_CELL_SAMPLE_COUNTS"], "cell_sample_counts"),
+                  "trials": positive_int(os.environ["CUSTOM_TRIALS"], "trials"),
+                  "steps": positive_int(os.environ["CUSTOM_STEPS"], "steps"),
+                  "seed": int(os.environ["CUSTOM_SEED"]),
+              }
+          else:
+              raise ValueError(f"unknown preset: {preset}")
+
+          if cfg["reference_grid_size"] <= max(cfg["grid_sizes"]):
+              raise ValueError("reference_grid_size must exceed all grid_sizes")
+          if len(set(cfg["cell_sample_counts"])) != len(cfg["cell_sample_counts"]):
+              raise ValueError("cell_sample_counts must not contain duplicates")
+
+          values = {
+              "GRID_SIZES": " ".join(str(v) for v in cfg["grid_sizes"]),
+              "REFERENCE_GRID_SIZE": str(cfg["reference_grid_size"]),
+              "CELL_SAMPLE_COUNTS": " ".join(str(v) for v in cfg["cell_sample_counts"]),
+              "CELL_SAMPLE_COUNTS_JSON": json.dumps(cfg["cell_sample_counts"]),
+              "TRIALS": str(cfg["trials"]),
+              "STEPS": str(cfg["steps"]),
+              "SEED": str(cfg["seed"]),
+              "OUTPUT_DIR": "results/s3r3_sample_convergence_benefit",
+          }
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as handle:
+              for key, value in values.items():
+                  print(f"{key}={value}", file=handle)
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(
+              "# Resolved S3R3 sample-convergence parameters\n\n"
+              + "\n".join(f"- `{key}`: `{value}`" for key, value in values.items())
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run S3R3 regression tests
+        run: |
+          python -m pytest --rootdir . -q --strict-config \
+            tests/test_s3r3_relaxed_prototype.py \
+            tests/test_s3r3_evidence_summary.py
+
+      - name: Run evidence summaries for each tangent-cell sample count
+        run: |
+          rm -rf "$OUTPUT_DIR"
+          mkdir -p "$OUTPUT_DIR"
+          for sample_count in $CELL_SAMPLE_COUNTS; do
+            echo "Running S3R3 evidence summary with ${sample_count} tangent-cell samples"
+            python -m se3plusplus_s3f.cli s3r3-evidence-summary \
+              --grid-sizes $GRID_SIZES \
+              --reference-grid-size "$REFERENCE_GRID_SIZE" \
+              --trials "$TRIALS" \
+              --steps "$STEPS" \
+              --seed "$SEED" \
+              --cell-sample-count "$sample_count" \
+              --no-plots \
+              --output-dir "$OUTPUT_DIR/cell_samples_${sample_count}"
+          done
+
+      - name: Aggregate convergence and benefit report
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          import math
+          import os
+          from collections import defaultdict
+          from pathlib import Path
+
+          import matplotlib.pyplot as plt
+
+          output_dir = Path(os.environ["OUTPUT_DIR"])
+          sample_counts = [int(v) for v in os.environ["CELL_SAMPLE_COUNTS"].split()]
+          grid_sizes = [int(v) for v in os.environ["GRID_SIZES"].split()]
+          reference_sample_count = max(sample_counts)
+
+          def as_float(value):
+              return float(value) if value not in ("", None) else float("nan")
+
+          def finite(rows, column):
+              values = [as_float(row[column]) for row in rows]
+              return [value for value in values if math.isfinite(value)]
+
+          def mean(values):
+              return sum(values) / len(values) if values else float("nan")
+
+          def is_true(value):
+              return str(value).lower() == "true"
+
+          claims = []
+          for sample_count in sample_counts:
+              run_dir = output_dir / f"cell_samples_{sample_count}"
+              metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+              configured_count = int(metadata["config"]["prototype"]["cell_sample_count"])
+              if configured_count != sample_count:
+                  raise AssertionError(metadata)
+              with (run_dir / "s3r3_evidence_claims.csv").open(newline="", encoding="utf-8") as handle:
+                  for row in csv.DictReader(handle):
+                      row = dict(row)
+                      row["cell_sample_count"] = str(sample_count)
+                      claims.append(row)
+
+          claim_columns = ["cell_sample_count", *[name for name in claims[0] if name != "cell_sample_count"]]
+          claims_path = output_dir / "s3r3_sample_convergence_claims.csv"
+          with claims_path.open("w", newline="", encoding="utf-8") as handle:
+              writer = csv.DictWriter(handle, fieldnames=claim_columns)
+              writer.writeheader()
+              writer.writerows(claims)
+
+          grouped = defaultdict(list)
+          for row in claims:
+              grouped[(row["cell_sample_count"], row["evidence_source"], row["candidate_variant"], row["comparator_variant"])].append(row)
+
+          summary_columns = [
+              "cell_sample_count", "evidence_source", "candidate_variant", "comparator_variant",
+              "claim_rows", "overall_supports", "mean_rmse_gain_pct", "min_rmse_gain_pct",
+              "max_rmse_gain_pct", "mean_nees_ratio", "mean_coverage_delta",
+              "mean_runtime_ratio", "mean_reference_rmse_gain_pct",
+          ]
+          summary_rows = []
+          for key, rows in sorted(grouped.items(), key=lambda item: (int(item[0][0]), item[0][1], item[0][2], item[0][3])):
+              sample_count, evidence_source, candidate, comparator = key
+              gains = finite(rows, "position_rmse_gain_pct")
+              reference_gains = finite(rows, "reference_rmse_gain_pct")
+              summary_rows.append({
+                  "cell_sample_count": sample_count,
+                  "evidence_source": evidence_source,
+                  "candidate_variant": candidate,
+                  "comparator_variant": comparator,
+                  "claim_rows": len(rows),
+                  "overall_supports": sum(is_true(row["supports_overall_claim"]) for row in rows),
+                  "mean_rmse_gain_pct": mean(gains),
+                  "min_rmse_gain_pct": min(gains) if gains else float("nan"),
+                  "max_rmse_gain_pct": max(gains) if gains else float("nan"),
+                  "mean_nees_ratio": mean(finite(rows, "mean_nees_ratio")),
+                  "mean_coverage_delta": mean(finite(rows, "coverage_delta")),
+                  "mean_runtime_ratio": mean(finite(rows, "runtime_ratio")),
+                  "mean_reference_rmse_gain_pct": mean(reference_gains),
+              })
+
+          summary_path = output_dir / "s3r3_sample_convergence_summary.csv"
+          with summary_path.open("w", newline="", encoding="utf-8") as handle:
+              writer = csv.DictWriter(handle, fieldnames=summary_columns)
+              writer.writeheader()
+              writer.writerows(summary_rows)
+
+          reference_claims = {row["claim_id"]: row for row in claims if int(row["cell_sample_count"]) == reference_sample_count}
+          stability_columns = [
+              "cell_sample_count", "reference_cell_sample_count", "claim_id", "evidence_source",
+              "grid_size", "candidate_variant", "comparator_variant",
+              "position_rmse_gain_delta_pct", "mean_nees_ratio_delta",
+              "coverage_delta_delta", "runtime_ratio_delta", "reference_rmse_gain_delta_pct",
+              "candidate_position_rmse_relative_delta", "stable_gain_abs_le_5pct",
+              "stable_candidate_rmse_rel_le_5pct", "stable_nees_ratio_abs_le_0p10",
+          ]
+          stability_rows = []
+          for row in claims:
+              sample_count = int(row["cell_sample_count"])
+              if sample_count == reference_sample_count:
+                  continue
+              reference = reference_claims[row["claim_id"]]
+              ref_candidate_rmse = as_float(reference["candidate_position_rmse"])
+              candidate_rmse = as_float(row["candidate_position_rmse"])
+              gain_delta = as_float(row["position_rmse_gain_pct"]) - as_float(reference["position_rmse_gain_pct"])
+              nees_delta = as_float(row["mean_nees_ratio"]) - as_float(reference["mean_nees_ratio"])
+              reference_gain_delta = as_float(row["reference_rmse_gain_pct"]) - as_float(reference["reference_rmse_gain_pct"])
+              candidate_relative_delta = abs(candidate_rmse - ref_candidate_rmse) / ref_candidate_rmse if ref_candidate_rmse else float("inf")
+              stability_rows.append({
+                  "cell_sample_count": sample_count,
+                  "reference_cell_sample_count": reference_sample_count,
+                  "claim_id": row["claim_id"],
+                  "evidence_source": row["evidence_source"],
+                  "grid_size": row["grid_size"],
+                  "candidate_variant": row["candidate_variant"],
+                  "comparator_variant": row["comparator_variant"],
+                  "position_rmse_gain_delta_pct": gain_delta,
+                  "mean_nees_ratio_delta": nees_delta,
+                  "coverage_delta_delta": as_float(row["coverage_delta"]) - as_float(reference["coverage_delta"]),
+                  "runtime_ratio_delta": as_float(row["runtime_ratio"]) - as_float(reference["runtime_ratio"]),
+                  "reference_rmse_gain_delta_pct": reference_gain_delta,
+                  "candidate_position_rmse_relative_delta": candidate_relative_delta,
+                  "stable_gain_abs_le_5pct": abs(gain_delta) <= 5.0,
+                  "stable_candidate_rmse_rel_le_5pct": candidate_relative_delta <= 0.05,
+                  "stable_nees_ratio_abs_le_0p10": abs(nees_delta) <= 0.10,
+              })
+
+          stability_path = output_dir / "s3r3_sample_convergence_stability.csv"
+          with stability_path.open("w", newline="", encoding="utf-8") as handle:
+              writer = csv.DictWriter(handle, fieldnames=stability_columns)
+              writer.writeheader()
+              writer.writerows(stability_rows)
+
+          def select(evidence_source, candidate, comparator):
+              return [row for row in claims if row["evidence_source"] == evidence_source and row["candidate_variant"] == candidate and row["comparator_variant"] == comparator]
+
+          direct_rows = select("relaxed_truth", "r1_r2", "baseline")
+          reference_rows = select("highres_reference", "r1_r2", "baseline")
+
+          def plot_metric(rows, column, ylabel, filename):
+              fig, ax = plt.subplots(figsize=(7.0, 4.2))
+              for grid_size in grid_sizes:
+                  series = sorted([row for row in rows if int(row["grid_size"]) == grid_size], key=lambda row: int(row["cell_sample_count"]))
+                  if series:
+                      ax.plot([int(row["cell_sample_count"]) for row in series], [as_float(row[column]) for row in series], marker="o", linewidth=1.6, label=f"{grid_size} cells")
+              ax.set_xscale("log")
+              ax.set_xlabel("Local tangent-cell sample count")
+              ax.set_ylabel(ylabel)
+              ax.grid(True, alpha=0.3)
+              ax.legend()
+              fig.tight_layout()
+              path = output_dir / filename
+              fig.savefig(path)
+              plt.close(fig)
+              return path
+
+          plot_paths = [
+              plot_metric(direct_rows, "position_rmse_gain_pct", "Direct-truth RMSE gain over baseline [%]", "s3r3_direct_truth_rmse_gain_by_samples.pdf"),
+              plot_metric(direct_rows, "mean_nees_ratio", "Direct-truth NEES ratio, R1+R2 / baseline", "s3r3_direct_truth_nees_ratio_by_samples.pdf"),
+              plot_metric(reference_rows, "reference_rmse_gain_pct", "Dense-reference RMSE gain over baseline [%]", "s3r3_reference_rmse_gain_by_samples.pdf"),
+          ]
+
+          direct_stability = [row for row in stability_rows if row["evidence_source"] == "relaxed_truth" and row["candidate_variant"] == "r1_r2" and row["comparator_variant"] == "baseline"]
+          stable_gain_rows = sum(bool(row["stable_gain_abs_le_5pct"]) for row in direct_stability)
+          stable_rmse_rows = sum(bool(row["stable_candidate_rmse_rel_le_5pct"]) for row in direct_stability)
+          max_abs_gain_delta = max((abs(float(row["position_rmse_gain_delta_pct"])) for row in direct_stability), default=float("nan"))
+          max_rmse_delta = max((float(row["candidate_position_rmse_relative_delta"]) for row in direct_stability), default=float("nan"))
+
+          def summary_line(rows, sample_count, evidence, metric="position_rmse_gain_pct"):
+              subset = [row for row in rows if int(row["cell_sample_count"]) == sample_count]
+              gains = finite(subset, metric)
+              nees = finite(subset, "mean_nees_ratio")
+              supports = sum(is_true(row["supports_overall_claim"]) for row in subset)
+              return f"| {sample_count} | {evidence} | {supports}/{len(subset)} | {mean(gains):.2f} | {min(gains):.2f} | {max(gains):.2f} | {mean(nees):.3f} |"
+
+          note_lines = [
+              "# S3R3 Sample-Convergence Benefit Report", "",
+              "This run varies the local tangent-cell sample count used by the S3/R3 R1/R2 approximation while keeping trials, grid sizes, and dense-reference grid fixed.", "",
+              f"Grid sizes: `{grid_sizes}`",
+              f"Dense reference grid size: `{os.environ['REFERENCE_GRID_SIZE']}`",
+              f"Cell sample counts: `{sample_counts}`",
+              f"Trials: `{os.environ['TRIALS']}`; steps: `{os.environ['STEPS']}`; seed: `{os.environ['SEED']}`", "",
+              "## R1+R2 benefit by sample count", "",
+              "| Samples | Evidence | Overall support | Mean gain % | Min gain % | Max gain % | Mean NEES ratio |",
+              "|---:|---|---:|---:|---:|---:|---:|",
+          ]
+          for sample_count in sample_counts:
+              note_lines.append(summary_line(direct_rows, sample_count, "direct truth"))
+              note_lines.append(summary_line(reference_rows, sample_count, "dense reference", "reference_rmse_gain_pct"))
+          note_lines.extend([
+              "", "## Convergence against the largest sample count", "",
+              f"Using `{reference_sample_count}` samples as reference cubature, direct-truth R1+R2-vs-baseline gain is within 5 percentage points in `{stable_gain_rows}/{len(direct_stability)}` lower-sample rows.",
+              f"Direct-truth R1+R2 RMSE is within 5% of the `{reference_sample_count}`-sample value in `{stable_rmse_rows}/{len(direct_stability)}` lower-sample rows.",
+              f"Maximum absolute direct-truth gain deviation: `{max_abs_gain_delta:.2f}` percentage points.",
+              f"Maximum direct-truth candidate-RMSE relative deviation: `{100.0 * max_rmse_delta:.2f}%`.", "",
+              "## Output files", "",
+              f"- `{claims_path.name}`",
+              f"- `{summary_path.name}`",
+              f"- `{stability_path.name}`",
+              *[f"- `{path.name}`" for path in plot_paths], "",
+              "The S3/R3 results remain prototype evidence: the correction uses local tangent samples, not exact S3 Voronoi-cell moments.",
+          ])
+          (output_dir / "s3r3_sample_convergence_note.md").write_text("\n".join(note_lines) + "\n", encoding="utf-8")
+
+          metadata = {
+              "experiment": "s3r3_sample_convergence_benefit",
+              "grid_sizes": grid_sizes,
+              "reference_grid_size": int(os.environ["REFERENCE_GRID_SIZE"]),
+              "cell_sample_counts": sample_counts,
+              "reference_cell_sample_count": reference_sample_count,
+              "trials": int(os.environ["TRIALS"]),
+              "steps": int(os.environ["STEPS"]),
+              "seed": int(os.environ["SEED"]),
+              "claims_rows": len(claims),
+              "summary_rows": len(summary_rows),
+              "stability_rows": len(stability_rows),
+          }
+          (output_dir / "run_metadata.json").write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as handle:
+              handle.write("\n# S3R3 sample-convergence headline\n\n")
+              for sample_count in sample_counts:
+                  handle.write(summary_line(direct_rows, sample_count, "direct truth") + "\n")
+              handle.write(f"\nWrote `{output_dir}`.\n")
+          PY
+
+      - name: Validate aggregate outputs
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          import math
+          import os
+          from pathlib import Path
+
+          output_dir = Path(os.environ["OUTPUT_DIR"])
+          required = [
+              "s3r3_sample_convergence_claims.csv",
+              "s3r3_sample_convergence_summary.csv",
+              "s3r3_sample_convergence_stability.csv",
+              "s3r3_sample_convergence_note.md",
+              "run_metadata.json",
+              "s3r3_direct_truth_rmse_gain_by_samples.pdf",
+              "s3r3_direct_truth_nees_ratio_by_samples.pdf",
+              "s3r3_reference_rmse_gain_by_samples.pdf",
+          ]
+          missing = [name for name in required if not (output_dir / name).is_file()]
+          if missing:
+              raise FileNotFoundError(missing)
+
+          metadata = json.loads((output_dir / "run_metadata.json").read_text(encoding="utf-8"))
+          if metadata["experiment"] != "s3r3_sample_convergence_benefit":
+              raise AssertionError(metadata)
+          sample_count = len(os.environ["CELL_SAMPLE_COUNTS"].split())
+          grid_count = len(os.environ["GRID_SIZES"].split())
+          expected_claim_rows = sample_count * grid_count * 3
+          if metadata["claims_rows"] != expected_claim_rows:
+              raise AssertionError(metadata)
+
+          claims = list(csv.DictReader((output_dir / "s3r3_sample_convergence_claims.csv").open(newline="", encoding="utf-8")))
+          for row in claims:
+              for column in ("position_rmse_gain_pct", "mean_nees_ratio", "runtime_ratio"):
+                  if not math.isfinite(float(row[column])):
+                      raise AssertionError(row)
+          png_files = list(output_dir.rglob("*.png"))
+          if png_files:
+              raise AssertionError(f"Unexpected PNG artifacts: {png_files}")
+          PY
+
+      - name: Upload S3R3 sample-convergence benefit artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: s3r3-sample-convergence-benefit-${{ github.run_number }}
+          path: results/s3r3_sample_convergence_benefit
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
