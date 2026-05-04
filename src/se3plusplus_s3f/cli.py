@@ -19,6 +19,7 @@ from .s1r2.relaxed_s3f_pilot import PilotConfig, load_pilot_config, write_relaxe
 from .s1r2.runtime_profile import RuntimeProfileConfig, write_s3f_runtime_profile_outputs
 from .s3r3.evidence_summary import S3R3EvidenceSummaryConfig, write_s3r3_evidence_summary_outputs
 from .s3r3.highres_reference import S3R3HighResReferenceConfig, write_s3r3_highres_reference_outputs
+from .s3r3.orientation_basis import S3R3OrientationBasisConfig, write_s3r3_orientation_basis_outputs
 from .s3r3.particle_comparison import S3R3ParticleComparisonConfig, write_s3r3_particle_comparison_outputs
 from .s3r3.relaxed_s3f_prototype import S3R3PrototypeConfig, write_s3r3_relaxed_outputs
 from .s3r3.stress_sweep import S3R3StressSweepConfig, write_s3r3_stress_sweep_outputs
@@ -178,6 +179,26 @@ def main() -> None:
             cell_sample_count=args.cell_sample_count,
         )
         outputs = write_s3r3_relaxed_outputs(
+            output_dir=args.output_dir,
+            config=config,
+            write_plots=not args.no_plots,
+        )
+        for label, path in outputs.items():
+            print(f"Wrote {label}: {path}")
+        return
+
+    if args.command == "s3r3-orientation-basis":
+        config = S3R3OrientationBasisConfig(
+            prototype=S3R3PrototypeConfig(
+                grid_sizes=tuple(args.grid_sizes),
+                n_trials=args.trials,
+                n_steps=args.steps,
+                seed=args.seed,
+                cell_sample_count=args.cell_sample_count,
+            ),
+            variant=args.variant,
+        )
+        outputs = write_s3r3_orientation_basis_outputs(
             output_dir=args.output_dir,
             config=config,
             write_plots=not args.no_plots,
@@ -415,6 +436,23 @@ def _parse_args() -> argparse.Namespace:
     s3r3.add_argument("--seed", type=int, default=23)
     s3r3.add_argument("--cell-sample-count", type=int, default=27)
     s3r3.add_argument("--no-plots", action="store_true")
+
+    s3r3_orientation_basis = subparsers.add_parser(
+        "s3r3-orientation-basis",
+        help="Check PyRecEst's S3+ hyperhemispherical grid filter as the S3F orientation marginal.",
+    )
+    s3r3_orientation_basis.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("results") / "s3r3_orientation_basis",
+    )
+    s3r3_orientation_basis.add_argument("--grid-sizes", type=int, nargs="+", default=[8, 16, 32])
+    s3r3_orientation_basis.add_argument("--variant", choices=["baseline", "r1", "r1_r2"], default="r1_r2")
+    s3r3_orientation_basis.add_argument("--trials", type=int, default=4)
+    s3r3_orientation_basis.add_argument("--steps", type=int, default=5)
+    s3r3_orientation_basis.add_argument("--seed", type=int, default=43)
+    s3r3_orientation_basis.add_argument("--cell-sample-count", type=int, default=27)
+    s3r3_orientation_basis.add_argument("--no-plots", action="store_true")
 
     s3r3_highres = subparsers.add_parser(
         "s3r3-highres-reference",

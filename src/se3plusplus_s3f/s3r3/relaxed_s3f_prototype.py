@@ -18,10 +18,8 @@ from pyrecest.distributions.cart_prod.state_space_subdivision_gaussian_distribut
 from pyrecest.distributions.hypersphere_subset.hyperhemispherical_grid_distribution import (
     HyperhemisphericalGridDistribution,
 )
-from pyrecest.distributions.hypersphere_subset.hyperhemispherical_uniform_distribution import (
-    HyperhemisphericalUniformDistribution,
-)
 from pyrecest.distributions.nonperiodic.gaussian_distribution import GaussianDistribution
+from pyrecest.filters.hyperhemispherical_grid_filter import HyperhemisphericalGridFilter
 from pyrecest.filters.state_space_subdivision_filter import StateSpaceSubdivisionFilter
 
 from ..s1r2.plotting import format_plot_list, save_figure
@@ -159,28 +157,56 @@ def write_s3r3_relaxed_outputs(
     return outputs
 
 
-def make_s3r3_filter(config: S3R3PrototypeConfig, grid_size: int) -> StateSpaceSubdivisionFilter:
-    """Construct an S3+ x R3 S3F state with one Gaussian position component per quaternion grid point."""
+def make_s3r3_orientation_filter(config: S3R3PrototypeConfig, grid_size: int) -> HyperhemisphericalGridFilter:
+    """Construct the PyRecEst S3+ orientation marginal used by the coupled S3F state."""
 
     if grid_size <= 0:
         raise ValueError("grid_size must be positive.")
 
-    gd_uniform = HyperhemisphericalGridDistribution.from_distribution(
-        HyperhemisphericalUniformDistribution(3),
-        grid_size,
-        "leopardi_symm",
-    )
-    grid = _canonical_quaternions(np.asarray(gd_uniform.get_grid(), dtype=float))
+    orientation_filter = HyperhemisphericalGridFilter(grid_size, 3, "leopardi_symm")
+    grid = _canonical_quaternions(np.asarray(orientation_filter.filter_state.get_grid(), dtype=float))
     grid_values = _orientation_prior_values(grid, config)
     gd = HyperhemisphericalGridDistribution(grid, grid_values, enforce_pdf_nonnegative=True)
     gd.normalize_in_place(warn_unnorm=False)
+    orientation_filter.filter_state = gd
+    return orientation_filter
+
+
+def make_s3r3_filter(config: S3R3PrototypeConfig, grid_size: int) -> StateSpaceSubdivisionFilter:
+    """Construct an S3+ x R3 S3F state with one Gaussian position component per quaternion grid point."""
+
+    orientation_filter = make_s3r3_orientation_filter(config, grid_size)
+    gd = orientation_filter.filter_state
 
     initial_covariance = np.eye(3) * config.initial_position_std**2
     gaussians = [
         GaussianDistribution(np.zeros(3), initial_covariance.copy(), check_validity=False)
-        for _ in range(grid.shape[0])
+        for _ in range(gd.get_grid().shape[0])
     ]
     return StateSpaceSubdivisionFilter(StateSpaceSubdivisionGaussianDistribution(gd, gaussians))
+
+
+def s3r3_orientation_filter_from_s3f(filter_: StateSpaceSubdivisionFilter) -> HyperhemisphericalGridFilter:
+    """Return the current S3F orientation marginal as a PyRecEst hyperhemispherical grid filter."""
+
+    state = filter_.filter_state
+    if state.lin_dim != 3:
+        raise ValueError("s3r3_orientation_filter_from_s3f requires a 3-D linear state.")
+
+    grid = _canonical_quaternions(np.asarray(state.gd.get_grid(), dtype=float))
+    grid_values = np.asarray(state.gd.grid_values, dtype=float)
+    gd = HyperhemisphericalGridDistribution(grid, grid_values, enforce_pdf_nonnegative=True)
+    gd.normalize_in_place(warn_unnorm=False)
+    orientation_filter = HyperhemisphericalGridFilter(grid.shape[0], 3, "leopardi_symm")
+    orientation_filter.filter_state = gd
+    return orientation_filter
+
+
+def s3r3_orientation_point_estimate(filter_: StateSpaceSubdivisionFilter) -> np.ndarray:
+    """Return PyRecEst's orientation point estimate from the S3F orientation marginal."""
+
+    orientation_filter = s3r3_orientation_filter_from_s3f(filter_)
+    return _canonical_quaternions(np.asarray(orientation_filter.get_point_estimate(), dtype=float))
 
 
 def generate_s3r3_trials(config: S3R3PrototypeConfig) -> list[dict[str, np.ndarray]]:
