@@ -12,6 +12,7 @@ on:
       - "pyproject.toml"
       - "README.md"
       - ".github/workflows/se3plusplus-s3f-ci.yml"
+      - ".github/workflows/s3r3-dynamic-pose.yml"
       - ".github/workflows/s3r3-particle-comparison.yml"
   pull_request:
     branches:
@@ -24,6 +25,7 @@ on:
       - "pyproject.toml"
       - "README.md"
       - ".github/workflows/se3plusplus-s3f-ci.yml"
+      - ".github/workflows/s3r3-dynamic-pose.yml"
       - ".github/workflows/s3r3-particle-comparison.yml"
   workflow_dispatch:
 

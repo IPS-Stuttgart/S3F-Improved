@@ -7,6 +7,7 @@ from .s1r2.highres_reference import HighResReferenceConfig, run_highres_referenc
 from .s1r2.quality_cost import QualityCostConfig, QualityCostResult, run_quality_cost_report
 from .s1r2.runtime_profile import RuntimeProfileConfig, run_s3f_runtime_profile
 from .s3r3.evidence_summary import S3R3EvidenceSummaryConfig, S3R3EvidenceSummaryResult, run_s3r3_evidence_summary
+from .s3r3.dynamic_pose import S3R3DynamicPoseConfig, S3R3DynamicPoseResult, run_s3r3_dynamic_pose_benchmark
 from .s3r3.highres_reference import S3R3HighResReferenceConfig, run_s3r3_highres_reference_benchmark
 from .s3r3.orientation_basis import S3R3OrientationBasisConfig, run_s3r3_orientation_basis_diagnostic
 from .s3r3.particle_comparison import S3R3ParticleComparisonConfig, S3R3ParticleComparisonResult, run_s3r3_particle_comparison
@@ -22,6 +23,8 @@ __all__ = [
     "QualityCostConfig",
     "QualityCostResult",
     "RuntimeProfileConfig",
+    "S3R3DynamicPoseConfig",
+    "S3R3DynamicPoseResult",
     "S3R3EvidenceSummaryConfig",
     "S3R3EvidenceSummaryResult",
     "S3R3HighResReferenceConfig",
@@ -39,6 +42,7 @@ __all__ = [
     "run_quality_cost_report",
     "run_relaxed_s3f_pilot",
     "run_s3r3_evidence_summary",
+    "run_s3r3_dynamic_pose_benchmark",
     "run_s3r3_highres_reference_benchmark",
     "run_s3r3_orientation_basis_diagnostic",
     "run_s3r3_particle_comparison",
