@@ -352,13 +352,15 @@ jobs:
 
       - name: Run S1/R2 quality-cost experiment
         run: |
+          read -r -a grid_sizes <<< "$GRID_SIZES"
+          read -r -a particle_counts <<< "$PARTICLE_COUNTS"
           python -m se3plusplus_s3f.cli quality-cost \
-            --grid-sizes $GRID_SIZES \
+            --grid-sizes "${grid_sizes[@]}" \
             --reference-grid-size "$REFERENCE_GRID_SIZE" \
             --trials "$TRIALS" \
             --steps "$STEPS" \
             --repeats "$REPEATS" \
-            --particle-counts $PARTICLE_COUNTS \
+            --particle-counts "${particle_counts[@]}" \
             --output-dir "$OUTPUT_DIR"
 
       - name: Validate S1/R2 outputs
@@ -468,8 +470,9 @@ jobs:
 
       - name: Run S3R3 evidence summary
         run: |
+          read -r -a grid_sizes <<< "$GRID_SIZES"
           python -m se3plusplus_s3f.cli s3r3-evidence-summary \
-            --grid-sizes $GRID_SIZES \
+            --grid-sizes "${grid_sizes[@]}" \
             --reference-grid-size "$REFERENCE_GRID_SIZE" \
             --trials "$TRIALS" \
             --steps "$STEPS" \
@@ -576,8 +579,9 @@ jobs:
 
       - name: Run S3R3 evidence summary at this cell-sample count
         run: |
+          read -r -a grid_sizes <<< "$GRID_SIZES"
           python -m se3plusplus_s3f.cli s3r3-evidence-summary \
-            --grid-sizes $GRID_SIZES \
+            --grid-sizes "${grid_sizes[@]}" \
             --reference-grid-size "$REFERENCE_GRID_SIZE" \
             --trials "$TRIALS" \
             --steps "$STEPS" \
@@ -666,10 +670,13 @@ jobs:
 
       - name: Run S3R3 stress sweep
         run: |
+          read -r -a grid_sizes <<< "$GRID_SIZES"
+          read -r -a prior_kappas <<< "$PRIOR_KAPPAS"
+          read -r -a body_increment_scales <<< "$BODY_INCREMENT_SCALES"
           python -m se3plusplus_s3f.cli s3r3-stress-sweep \
-            --grid-sizes $GRID_SIZES \
-            --prior-kappas $PRIOR_KAPPAS \
-            --body-increment-scales $BODY_INCREMENT_SCALES \
+            --grid-sizes "${grid_sizes[@]}" \
+            --prior-kappas "${prior_kappas[@]}" \
+            --body-increment-scales "${body_increment_scales[@]}" \
             --trials "$TRIALS" \
             --steps "$STEPS" \
             --cell-sample-count "$CELL_SAMPLE_COUNT" \

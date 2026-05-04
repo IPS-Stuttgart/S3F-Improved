@@ -1,5 +1,11 @@
 {
   "$schema": "https://raw.githubusercontent.com/kucherenko/jscpd/master/schemas/options.json",
   "gitignore": true,
-  "threshold": 1
+  "threshold": 1,
+  "minLines": 10,
+  "minTokens": 120,
+  "ignore": [
+    ".github/workflows/**/*.yml",
+    ".github/workflows/**/*.yaml"
+  ]
 }
