@@ -144,6 +144,20 @@ This writes grid-matching diagnostics, PyRecEst orientation point-estimate
 errors, effective orientation-cell counts, plots, metadata, and a short note to
 `results/s3r3_orientation_basis/`.
 
+## Run a Dynamic S3+ x R3 Pose Benchmark
+
+To test the relaxed prediction when orientation itself evolves with a known
+quaternion increment:
+
+```bash
+se3plusplus-s3f s3r3-dynamic-pose
+```
+
+This uses `q_next = q_current * delta_q` and
+`p_next = p_current + R(q_current) u + noise`, with a soft PyRecEst
+hyperhemispherical transition density for the S3+ grid. It writes metrics,
+claim rows, plots, metadata, and a short note to `results/s3r3_dynamic_pose/`.
+
 ## Compare S3R3 Against a High-Resolution Reference
 
 To test whether coarse S3R3 relaxed propagation follows a denser S3F reference:
