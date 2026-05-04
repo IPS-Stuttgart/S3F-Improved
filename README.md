@@ -131,6 +131,19 @@ This writes outputs to `results/s3r3_relaxed/`. For a reproducible runner-side
 report without committing generated files, use the manual GitHub Actions
 workflow `S3R3 Relaxed Report`.
 
+## Check the S3+ Orientation Basis
+
+To verify that PyRecEst's `HyperhemisphericalGridFilter` can serve as the
+quaternion orientation marginal for the coupled `S3+ x R3` S3F prototype:
+
+```bash
+se3plusplus-s3f s3r3-orientation-basis
+```
+
+This writes grid-matching diagnostics, PyRecEst orientation point-estimate
+errors, effective orientation-cell counts, plots, metadata, and a short note to
+`results/s3r3_orientation_basis/`.
+
 ## Compare S3R3 Against a High-Resolution Reference
 
 To test whether coarse S3R3 relaxed propagation follows a denser S3F reference:

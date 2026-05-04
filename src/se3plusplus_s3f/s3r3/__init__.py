@@ -17,6 +17,11 @@ from .particle_comparison import (
     run_s3r3_particle_comparison,
     write_s3r3_particle_comparison_outputs,
 )
+from .orientation_basis import (
+    S3R3OrientationBasisConfig,
+    run_s3r3_orientation_basis_diagnostic,
+    write_s3r3_orientation_basis_outputs,
+)
 from .relaxed_s3f_prototype import (
     S3R3PrototypeConfig,
     run_s3r3_relaxed_prototype,
@@ -33,6 +38,7 @@ __all__ = [
     "S3R3EvidenceSummaryConfig",
     "S3R3EvidenceSummaryResult",
     "S3R3HighResReferenceConfig",
+    "S3R3OrientationBasisConfig",
     "S3R3ParticleComparisonConfig",
     "S3R3ParticleComparisonResult",
     "S3R3PrototypeConfig",
@@ -40,11 +46,13 @@ __all__ = [
     "S3R3StressSweepResult",
     "run_s3r3_evidence_summary",
     "run_s3r3_highres_reference_benchmark",
+    "run_s3r3_orientation_basis_diagnostic",
     "run_s3r3_particle_comparison",
     "run_s3r3_relaxed_prototype",
     "run_s3r3_stress_sweep",
     "write_s3r3_evidence_summary_outputs",
     "write_s3r3_highres_reference_outputs",
+    "write_s3r3_orientation_basis_outputs",
     "write_s3r3_particle_comparison_outputs",
     "write_s3r3_relaxed_outputs",
     "write_s3r3_stress_sweep_outputs",

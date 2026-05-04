@@ -2,14 +2,18 @@ import csv
 import json
 
 import numpy as np
+from pyrecest.filters.hyperhemispherical_grid_filter import HyperhemisphericalGridFilter
 
 from se3plusplus_s3f.s3r3.relaxed_s3f_prototype import (
     S3R3PrototypeConfig,
     _cached_s3r3_cell_statistics,
     make_s3r3_filter,
+    make_s3r3_orientation_filter,
     predict_s3r3_relaxed,
     run_s3r3_relaxed_prototype,
     s3r3_cell_statistics,
+    s3r3_orientation_filter_from_s3f,
+    s3r3_orientation_point_estimate,
     write_s3r3_relaxed_outputs,
 )
 
@@ -47,6 +51,28 @@ def test_s3r3_cell_statistics_reuses_identical_grid_cache():
     cache_info = _cached_s3r3_cell_statistics.cache_info()
     assert cache_info.misses == 1
     assert cache_info.hits == 1
+
+
+def test_s3r3_filter_uses_pyrecest_hyperhemispherical_orientation_basis():
+    config = S3R3PrototypeConfig(grid_sizes=(8,), n_trials=1, n_steps=1)
+
+    orientation_filter = make_s3r3_orientation_filter(config, 8)
+    s3f_filter = make_s3r3_filter(config, 8)
+    extracted_orientation_filter = s3r3_orientation_filter_from_s3f(s3f_filter)
+
+    assert isinstance(orientation_filter, HyperhemisphericalGridFilter)
+    assert isinstance(extracted_orientation_filter, HyperhemisphericalGridFilter)
+    np.testing.assert_allclose(orientation_filter.filter_state.get_grid(), s3f_filter.filter_state.gd.get_grid(), atol=1e-12)
+    np.testing.assert_allclose(orientation_filter.filter_state.get_grid(), extracted_orientation_filter.filter_state.get_grid(), atol=1e-12)
+
+    expected_weights = np.asarray(orientation_filter.filter_state.grid_values, dtype=float)
+    actual_weights = np.asarray(extracted_orientation_filter.filter_state.grid_values, dtype=float)
+    np.testing.assert_allclose(actual_weights / np.sum(actual_weights), expected_weights / np.sum(expected_weights), atol=1e-12)
+
+    point_estimate = s3r3_orientation_point_estimate(s3f_filter)
+    assert point_estimate.shape == (4,)
+    assert point_estimate[-1] >= 0.0
+    np.testing.assert_allclose(np.linalg.norm(point_estimate), 1.0, atol=1e-12)
 
 
 def test_s3r3_predict_preserves_grid_masses_and_inflates_covariance():

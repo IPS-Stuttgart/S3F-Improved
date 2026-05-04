@@ -168,10 +168,12 @@ jobs:
         run: |
           rm -rf "$OUTPUT_DIR"
           mkdir -p "$OUTPUT_DIR"
-          for sample_count in $CELL_SAMPLE_COUNTS; do
+          read -r -a cell_sample_counts <<< "$CELL_SAMPLE_COUNTS"
+          read -r -a grid_sizes <<< "$GRID_SIZES"
+          for sample_count in "${cell_sample_counts[@]}"; do
             echo "Running S3R3 evidence summary with ${sample_count} tangent-cell samples"
             python -m se3plusplus_s3f.cli s3r3-evidence-summary \
-              --grid-sizes $GRID_SIZES \
+              --grid-sizes "${grid_sizes[@]}" \
               --reference-grid-size "$REFERENCE_GRID_SIZE" \
               --trials "$TRIALS" \
               --steps "$STEPS" \

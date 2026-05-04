@@ -23,7 +23,6 @@ from .relaxed_s3f_prototype import (
     _rotate_vectors,
     _symmetrize,
     generate_s3r3_trials,
-    s3r3_prototype_config_to_dict,
     s3r3_orientation_distance,
     validate_s3r3_prototype_config,
 )
