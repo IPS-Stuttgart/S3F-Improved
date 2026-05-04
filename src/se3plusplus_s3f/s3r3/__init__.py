@@ -12,6 +12,12 @@ from .dynamic_pose import (
     run_s3r3_dynamic_pose_benchmark,
     write_s3r3_dynamic_pose_outputs,
 )
+from .dynamic_robustness import (
+    S3R3DynamicRobustnessConfig,
+    S3R3DynamicRobustnessResult,
+    run_s3r3_dynamic_robustness_sweep,
+    write_s3r3_dynamic_robustness_outputs,
+)
 from .highres_reference import (
     S3R3HighResReferenceConfig,
     run_s3r3_highres_reference_benchmark,
@@ -45,6 +51,8 @@ __all__ = [
     "S3R3EvidenceSummaryResult",
     "S3R3DynamicPoseConfig",
     "S3R3DynamicPoseResult",
+    "S3R3DynamicRobustnessConfig",
+    "S3R3DynamicRobustnessResult",
     "S3R3HighResReferenceConfig",
     "S3R3OrientationBasisConfig",
     "S3R3ParticleComparisonConfig",
@@ -54,6 +62,7 @@ __all__ = [
     "S3R3StressSweepResult",
     "run_s3r3_evidence_summary",
     "run_s3r3_dynamic_pose_benchmark",
+    "run_s3r3_dynamic_robustness_sweep",
     "run_s3r3_highres_reference_benchmark",
     "run_s3r3_orientation_basis_diagnostic",
     "run_s3r3_particle_comparison",
@@ -61,6 +70,7 @@ __all__ = [
     "run_s3r3_stress_sweep",
     "write_s3r3_evidence_summary_outputs",
     "write_s3r3_dynamic_pose_outputs",
+    "write_s3r3_dynamic_robustness_outputs",
     "write_s3r3_highres_reference_outputs",
     "write_s3r3_orientation_basis_outputs",
     "write_s3r3_particle_comparison_outputs",

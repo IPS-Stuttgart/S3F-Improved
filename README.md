@@ -158,6 +158,19 @@ This uses `q_next = q_current * delta_q` and
 hyperhemispherical transition density for the S3+ grid. It writes metrics,
 claim rows, plots, metadata, and a short note to `results/s3r3_dynamic_pose/`.
 
+## Sweep Dynamic S3+ x R3 Robustness
+
+To check whether the dynamic pose result survives different random seeds and
+orientation-increment magnitudes:
+
+```bash
+se3plusplus-s3f s3r3-dynamic-robustness
+```
+
+This repeats the dynamic pose benchmark across seed and turn-rate scenarios,
+then writes raw metrics, raw claim rows, aggregate win-rate/RMSE/NEES tables,
+plots, metadata, and a short note to `results/s3r3_dynamic_robustness/`.
+
 ## Compare S3R3 Against a High-Resolution Reference
 
 To test whether coarse S3R3 relaxed propagation follows a denser S3F reference:

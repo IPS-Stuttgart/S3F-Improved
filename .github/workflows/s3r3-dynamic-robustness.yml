@@ -1,0 +1,222 @@
+name: S3R3 Dynamic Robustness
+
+permissions:
+  contents: read
+
+# jscpd:ignore-start
+on:
+  workflow_dispatch:
+    inputs:
+      grid_sizes:
+        description: Space-separated quaternion grid sizes.
+        required: true
+        default: "8 16 32 64"
+        type: string
+      seeds:
+        description: Space-separated random seeds.
+        required: true
+        default: "47 48 49 50 51"
+        type: string
+      orientation_increment_scales:
+        description: Space-separated scale factors for the tangent-vector orientation increment.
+        required: true
+        default: "0.5 1.0 1.5 2.0"
+        type: string
+      trials:
+        description: Synthetic trials used for each seed/scale scenario.
+        required: true
+        default: 32
+        type: number
+      steps:
+        description: Prediction/update steps in each trial.
+        required: true
+        default: 12
+        type: number
+      body_increment_scale:
+        description: Scale applied to the default body-frame displacement.
+        required: true
+        default: 1.0
+        type: number
+      orientation_increment:
+        description: Space-separated base tangent-vector increment for q_next = q * exp(scale * delta).
+        required: true
+        default: "0.0 0.18 0.06"
+        type: string
+      orientation_transition_kappa:
+        description: Soft grid-transition concentration for the known orientation increment.
+        required: true
+        default: 24.0
+        type: number
+      cell_sample_count:
+        description: Local tangent samples used for each quaternion cell.
+        required: true
+        default: 27
+        type: number
+      retention_days:
+        description: Days to retain the uploaded report artifact.
+        required: true
+        default: 30
+        type: number
+# jscpd:ignore-end
+
+concurrency:
+  group: s3r3-dynamic-robustness-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  s3r3-dynamic-robustness:
+    name: Build S3R3 dynamic robustness report
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    env:
+      GRID_SIZES: ${{ inputs.grid_sizes }}
+      SEEDS: ${{ inputs.seeds }}
+      ORIENTATION_INCREMENT_SCALES: ${{ inputs.orientation_increment_scales }}
+      TRIALS: ${{ inputs.trials }}
+      STEPS: ${{ inputs.steps }}
+      BODY_INCREMENT_SCALE: ${{ inputs.body_increment_scale }}
+      ORIENTATION_INCREMENT: ${{ inputs.orientation_increment }}
+      ORIENTATION_TRANSITION_KAPPA: ${{ inputs.orientation_transition_kappa }}
+      CELL_SAMPLE_COUNT: ${{ inputs.cell_sample_count }}
+      OUTPUT_DIR: results/s3r3_dynamic_robustness
+
+    steps:
+      # jscpd:ignore-start
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      # jscpd:ignore-end
+
+      # jscpd:ignore-start
+      - name: Run and validate dynamic robustness sweep
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          import math
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          def positive_int_list(name):
+              values = [int(token) for token in os.environ[name].split()]
+              if not values or min(values) <= 0:
+                  raise ValueError(f"{name} must contain positive integers.")
+              return values
+
+          def int_list(name):
+              values = [int(token) for token in os.environ[name].split()]
+              if not values:
+                  raise ValueError(f"{name} must not be empty.")
+              return values
+
+          def positive_float_list(name):
+              values = [float(token) for token in os.environ[name].split()]
+              if not values or min(values) <= 0.0:
+                  raise ValueError(f"{name} must contain positive values.")
+              return values
+
+          def float_triplet(name):
+              values = [float(token) for token in os.environ[name].split()]
+              if len(values) != 3:
+                  raise ValueError(f"{name} must contain exactly three floats.")
+              return values
+
+          grid_sizes = positive_int_list("GRID_SIZES")
+          seeds = int_list("SEEDS")
+          scales = positive_float_list("ORIENTATION_INCREMENT_SCALES")
+          orientation_increment = float_triplet("ORIENTATION_INCREMENT")
+          for scalar_name in ("TRIALS", "STEPS", "CELL_SAMPLE_COUNT"):
+              value = int(os.environ[scalar_name])
+              if value <= 0:
+                  raise ValueError(f"{scalar_name} must be positive.")
+          for scalar_name in ("BODY_INCREMENT_SCALE", "ORIENTATION_TRANSITION_KAPPA"):
+              value = float(os.environ[scalar_name])
+              if value <= 0.0:
+                  raise ValueError(f"{scalar_name} must be positive.")
+
+          command = [sys.executable, "-m", "se3plusplus_s3f.cli", "s3r3-dynamic-robustness"]
+          command.extend(["--grid-sizes", *(str(value) for value in grid_sizes)])
+          command.extend(["--seeds", *(str(value) for value in seeds)])
+          command.extend(["--orientation-increment-scales", *(str(value) for value in scales)])
+          command.extend(["--trials", os.environ["TRIALS"], "--steps", os.environ["STEPS"]])
+          command.extend(["--body-increment-scale", os.environ["BODY_INCREMENT_SCALE"]])
+          command.extend(["--orientation-increment", *(str(value) for value in orientation_increment)])
+          command.extend(["--orientation-transition-kappa", os.environ["ORIENTATION_TRANSITION_KAPPA"]])
+          command.extend(["--cell-sample-count", os.environ["CELL_SAMPLE_COUNT"]])
+          command.extend(["--output-dir", os.environ["OUTPUT_DIR"]])
+          subprocess.run(command, check=True)
+
+          output_dir = Path(os.environ["OUTPUT_DIR"])
+          files = {
+              "metrics": output_dir / "s3r3_dynamic_robustness_metrics.csv",
+              "claims": output_dir / "s3r3_dynamic_robustness_claims.csv",
+              "aggregates": output_dir / "s3r3_dynamic_robustness_aggregates.csv",
+              "metadata": output_dir / "run_metadata.json",
+              "note": output_dir / "s3r3_dynamic_robustness_note.md",
+              "gain_by_scale_plot": output_dir / "s3r3_dynamic_robustness_rmse_gain_by_scale.png",
+              "gain_heatmap": output_dir / "s3r3_dynamic_robustness_rmse_gain_heatmap.png",
+              "win_rate_heatmap": output_dir / "s3r3_dynamic_robustness_win_rate_heatmap.png",
+              "nees_heatmap": output_dir / "s3r3_dynamic_robustness_nees_ratio_heatmap.png",
+          }
+          missing = [name for name, path in files.items() if not path.exists()]
+          if missing:
+              raise FileNotFoundError(missing)
+
+          scenario_count = len(seeds) * len(scales)
+          expected_metrics = scenario_count * len(grid_sizes) * 3
+          expected_claims = scenario_count * len(grid_sizes) * 2
+          expected_aggregates = len(scales) * len(grid_sizes) * 2
+          metrics_rows = list(csv.DictReader(files["metrics"].open(newline="", encoding="utf-8")))
+          claim_rows = list(csv.DictReader(files["claims"].open(newline="", encoding="utf-8")))
+          aggregate_rows = list(csv.DictReader(files["aggregates"].open(newline="", encoding="utf-8")))
+          if len(metrics_rows) != expected_metrics:
+              raise AssertionError((len(metrics_rows), expected_metrics))
+          if len(claim_rows) != expected_claims:
+              raise AssertionError((len(claim_rows), expected_claims))
+          if len(aggregate_rows) != expected_aggregates:
+              raise AssertionError((len(aggregate_rows), expected_aggregates))
+
+          for row in aggregate_rows:
+              for column in ("win_rate", "mean_position_rmse_gain_pct", "mean_nees_ratio", "mean_runtime_ratio"):
+                  if not math.isfinite(float(row[column])):
+                      raise AssertionError(row)
+
+          metadata = json.loads(files["metadata"].read_text(encoding="utf-8"))
+          if metadata["experiment"] != "s3r3_dynamic_robustness":
+              raise AssertionError(metadata)
+          if metadata["aggregates_rows"] != len(aggregate_rows):
+              raise AssertionError(metadata)
+
+          print(f"Validated {len(metrics_rows)} metric rows, {len(claim_rows)} claim rows, and {len(aggregate_rows)} aggregate rows.")
+          PY
+
+      - name: Write report summary
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          note = Path(os.environ["OUTPUT_DIR"]) / "s3r3_dynamic_robustness_note.md"
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(note.read_text(encoding="utf-8"), encoding="utf-8")
+          PY
+      # jscpd:ignore-end
+
+      - name: Upload S3R3 dynamic robustness artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: s3r3-dynamic-robustness-${{ github.run_number }}
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
