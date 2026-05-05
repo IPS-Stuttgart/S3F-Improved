@@ -101,6 +101,11 @@ jobs:
           path: |
             megalinter-reports
             mega-linter.log
+
+      - name: Remove generated MegaLinter reports before PR creation
+        if: always()
+        run: sudo rm -rf megalinter-reports mega-linter.log
+
       # Create Pull Request step
       - name: Create Pull Request with applied fixes
         id: cpr
@@ -113,6 +118,17 @@ jobs:
           branch: megalinter-fixes
           labels: bot
           base: main
+          add-paths: |
+            .github/workflows/**
+            .mega-linter.yml
+            .jscpd.json
+            .markdownlint.json
+            .yamllint.yml
+            pyproject.toml
+            README.md
+            scripts/**
+            src/**
+            tests/**
 
       # Output PR details
       - name: Create PR output
