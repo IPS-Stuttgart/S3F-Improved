@@ -253,7 +253,8 @@ To use an existing 3-D trajectory before adding a full visual-inertial frontend,
 the EuRoC S3R3 smoke path reads the same ground-truth pose file and derives
 known body-frame translation controls plus quaternion increments from successive
 poses. Position measurements are simulated by adding Gaussian noise to the
-ground-truth positions.
+ground-truth positions. The report includes baseline S3F, `R1`, `R1+R2`, and a
+PyRecEst `UKFOnManifolds` baseline on `SO3 x R3` with a 6-D tangent covariance.
 
 ```bash
 se3plusplus-s3f euroc-s3r3-pose --groundtruth-path path/to/MH_01_easy.txt

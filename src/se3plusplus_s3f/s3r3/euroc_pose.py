@@ -19,6 +19,14 @@ from pyrecest.filters.state_space_subdivision_filter import StateSpaceSubdivisio
 
 from ..s1r2.plotting import format_plot_list, save_figure
 from .dynamic_pose import predict_s3r3_dynamic_pose
+from .manifold_ukf import (
+    SO3R3ManifoldUKFConfig,
+    make_so3r3_manifold_ukf,
+    predict_so3r3_manifold_ukf,
+    so3r3_manifold_ukf_orientation,
+    so3r3_manifold_ukf_position_error_stats,
+    update_so3r3_manifold_ukf,
+)
 from .relaxed_s3f_prototype import (
     SUPPORTED_S3R3_VARIANTS,
     VARIANT_LABELS,
@@ -33,6 +41,11 @@ from .relaxed_s3f_prototype import (
     s3r3_orientation_point_estimate,
 )
 
+
+EUROC_S3R3_VARIANT_LABELS = {
+    **VARIANT_LABELS,
+    "manifold_ukf": "Manifold UKF",
+}
 
 EUROC_S3R3_METRIC_FIELDNAMES = [
     "variant",
@@ -105,6 +118,9 @@ class EuRoCS3R3PoseConfig:
     orientation_prior_kappa: float = 12.0
     orientation_transition_kappa: float = 48.0
     cell_sample_count: int = 27
+    include_manifold_ukf: bool = True
+    ukf_alpha: float = 0.5
+    ukf_orientation_process_std: float = 0.10
 
 
 @dataclass(frozen=True)
@@ -174,6 +190,8 @@ def run_euroc_s3r3_pose(
         _run_variant(trajectory, controls, measurements, config, variant)
         for variant in config.variants
     ]
+    if config.include_manifold_ukf:
+        rows.append(_run_manifold_ukf_variant(trajectory, controls, measurements, config))
     return EuRoCS3R3PoseResult(metrics=rows, claims=_build_claim_rows(rows))
 
 
@@ -225,11 +243,14 @@ def _validate_config(config: EuRoCS3R3PoseConfig) -> None:
         raise ValueError("cell_sample_count must be positive.")
     if config.orientation_transition_kappa <= 0.0:
         raise ValueError("orientation_transition_kappa must be positive.")
+    if config.ukf_alpha <= 0.0:
+        raise ValueError("ukf_alpha must be positive.")
     for name, value in (
         ("measurement_noise_std", config.measurement_noise_std),
         ("process_noise_std", config.process_noise_std),
         ("initial_position_std", config.initial_position_std),
         ("orientation_prior_kappa", config.orientation_prior_kappa),
+        ("ukf_orientation_process_std", config.ukf_orientation_process_std),
     ):
         if value <= 0.0:
             raise ValueError(f"{name} must be positive.")
@@ -338,6 +359,71 @@ def _run_variant(
     }
 
 
+def _run_manifold_ukf_variant(
+    trajectory: EuRoCPoseTrajectory,
+    controls: dict[str, np.ndarray],
+    measurements: np.ndarray,
+    config: EuRoCS3R3PoseConfig,
+) -> dict[str, float | int | str]:
+    filter_ = make_so3r3_manifold_ukf(
+        trajectory.positions[0],
+        trajectory.quaternions[0],
+        SO3R3ManifoldUKFConfig(
+            measurement_noise_std=config.measurement_noise_std,
+            process_noise_std=config.process_noise_std,
+            initial_position_std=config.initial_position_std,
+            initial_orientation_std=float(np.sqrt(2.0 / config.orientation_prior_kappa)),
+            orientation_process_std=config.ukf_orientation_process_std,
+            alpha=config.ukf_alpha,
+        ),
+    )
+
+    position_sq_error = 0.0
+    orientation_error = 0.0
+    nees_sum = 0.0
+    coverage_hits = 0
+    runtime = 0.0
+
+    for step, measurement in enumerate(measurements):
+        start = perf_counter()
+        predict_so3r3_manifold_ukf(
+            filter_,
+            controls["body_increments"][step],
+            controls["orientation_increments"][step],
+        )
+        update_so3r3_manifold_ukf(filter_, measurement)
+        runtime += perf_counter() - start
+
+        true_position = trajectory.positions[step + 1]
+        true_orientation = trajectory.quaternions[step + 1]
+        error, nees = so3r3_manifold_ukf_position_error_stats(filter_, true_position)
+        position_sq_error += float(error @ error)
+        nees_sum += nees
+        coverage_hits += int(nees <= 7.814727903251179)
+        orientation_error += s3r3_orientation_distance(so3r3_manifold_ukf_orientation(filter_), true_orientation)
+
+    n_steps = measurements.shape[0]
+    body_norms = np.linalg.norm(controls["body_increments"], axis=1)
+    orientation_norms = np.asarray([_quaternion_angle(quaternion) for quaternion in controls["orientation_increments"]])
+    return {
+        "variant": "manifold_ukf",
+        "grid_size": config.grid_size,
+        "position_rmse": float(np.sqrt(position_sq_error / n_steps)),
+        "orientation_mode_error_rad": orientation_error / n_steps,
+        "orientation_point_error_rad": orientation_error / n_steps,
+        "mean_nees": nees_sum / n_steps,
+        "coverage_95": coverage_hits / n_steps,
+        "runtime_ms_per_step": 1000.0 * runtime / n_steps,
+        "n_steps": n_steps,
+        "duration_s": float(trajectory.timestamps_s[-1] - trajectory.timestamps_s[0]),
+        "path_length_m": float(np.sum(np.linalg.norm(np.diff(trajectory.positions, axis=0), axis=1))),
+        "mean_body_increment_m": float(np.mean(body_norms)),
+        "mean_orientation_increment_rad": float(np.mean(orientation_norms)),
+        "orientation_transition_kappa": config.orientation_transition_kappa,
+        "cell_sample_count": config.cell_sample_count,
+    }
+
+
 def _make_initial_filter(
     initial_position: np.ndarray,
     initial_orientation: np.ndarray,
@@ -376,6 +462,7 @@ def _build_claim_rows(metrics: list[dict[str, float | int | str]]) -> list[dict[
     for comparator_variant, comparison in (
         ("baseline", "R1+R2 vs baseline"),
         ("r1", "R1+R2 vs R1"),
+        ("manifold_ukf", "R1+R2 vs manifold UKF"),
     ):
         if comparator_variant in rows_by_variant:
             claims.append(_claim_row(candidate, rows_by_variant[comparator_variant], comparison))
@@ -468,12 +555,14 @@ def _write_note(
         "",
         "This run uses EuRoC ground-truth 3D poses to derive per-step body-frame translation controls and quaternion increments.",
         "No visual-inertial frontend is used; position measurements are simulated by adding Gaussian noise to ground-truth positions.",
+        "The `manifold_ukf` row is a PyRecEst UKF-M baseline on SO3 x R3 with a 6-D tangent covariance.",
         "",
         f"Ground truth: `{groundtruth_path}`",
         f"Grid size: {config.grid_size}",
         f"Steps: {config.max_steps}",
         f"Stride: {config.stride}",
         f"Cell sample count: {config.cell_sample_count}",
+        f"Manifold UKF included: {config.include_manifold_ukf}",
         f"Metrics: `{metrics_path.name}`",
         f"Claims: `{claims_path.name}`",
         "",
@@ -512,7 +601,7 @@ def _format_metrics_table(rows: list[dict[str, float | int | str]]) -> str:
     for row in rows:
         body.append(
             "| "
-            f"{VARIANT_LABELS[str(row['variant'])]} | "
+            f"{EUROC_S3R3_VARIANT_LABELS[str(row['variant'])]} | "
             f"{float(row['position_rmse']):.4f} | "
             f"{float(row['orientation_point_error_rad']):.3f} | "
             f"{float(row['mean_nees']):.3f} | "
@@ -532,9 +621,9 @@ def _write_plots(output_dir: Path, rows: list[dict[str, float | int | str]]) -> 
 
 def _write_bar_plot(output_dir: Path, rows: list[dict[str, float | int | str]], metric_name: str, y_label: str, filename: str) -> Path:
     fig, ax = plt.subplots(figsize=(6.4, 4.0))
-    labels = [VARIANT_LABELS[str(row["variant"])] for row in rows]
+    labels = [EUROC_S3R3_VARIANT_LABELS[str(row["variant"])] for row in rows]
     values = [float(row[metric_name]) for row in rows]
-    ax.bar(labels, values, color=["#4C78A8", "#F58518", "#54A24B"])
+    ax.bar(labels, values, color=["#4C78A8", "#F58518", "#54A24B", "#B279A2"])
     ax.set_ylabel(y_label)
     ax.grid(True, axis="y", alpha=0.3)
     ax.tick_params(axis="x", labelrotation=15)
