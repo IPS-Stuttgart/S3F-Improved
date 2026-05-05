@@ -35,7 +35,7 @@ env:
 
 jobs:
   euroc-mh01-smoke:
-    name: Download cached MH01 trajectory and run planar S3F
+    name: Download cached MH01 trajectory and run S3F smoke tests
     runs-on: ubuntu-latest
 
     steps:
@@ -81,7 +81,18 @@ jobs:
             --steps 50 \
             --output-dir ci_smoke/euroc_mh01_planar
 
-      - name: Validate EuRoC smoke metrics
+      - name: Run EuRoC S3R3 pose relaxed S3F smoke
+        run: |
+          python -m se3plusplus_s3f.cli \
+            euroc-s3r3-pose \
+            --groundtruth-path "${EUROC_MH01_PATH}" \
+            --grid-size 16 \
+            --stride 20 \
+            --steps 50 \
+            --cell-sample-count 27 \
+            --output-dir ci_smoke/euroc_mh01_s3r3_pose
+
+      - name: Validate EuRoC planar smoke metrics
         run: |
           python - <<'PY'
           import csv
@@ -121,8 +132,57 @@ jobs:
           print("EuRoC smoke rows:", rows)
           PY
 
+      - name: Validate EuRoC S3R3 pose smoke metrics
+        run: |
+          python - <<'PY'
+          import csv
+          import math
+          from pathlib import Path
+
+          output_dir = Path("ci_smoke/euroc_mh01_s3r3_pose")
+          metrics_path = output_dir / "euroc_s3r3_pose_metrics.csv"
+          claims_path = output_dir / "euroc_s3r3_pose_claims.csv"
+          note_path = output_dir / "euroc_s3r3_pose_note.md"
+          metadata_path = output_dir / "run_metadata.json"
+          assert metrics_path.exists(), metrics_path
+          assert claims_path.exists(), claims_path
+          assert note_path.exists(), note_path
+          assert metadata_path.exists(), metadata_path
+
+          rows = list(csv.DictReader(metrics_path.open(newline="", encoding="utf-8")))
+          claims = list(csv.DictReader(claims_path.open(newline="", encoding="utf-8")))
+          assert {row["variant"] for row in rows} == {"baseline", "r1", "r1_r2"}
+          assert len(claims) == 2
+          assert all(int(row["grid_size"]) == 16 for row in rows)
+          assert all(int(row["n_steps"]) == 50 for row in rows)
+
+          for row in rows:
+              position_rmse = float(row["position_rmse"])
+              orientation_error = float(row["orientation_point_error_rad"])
+              coverage = float(row["coverage_95"])
+              path_length = float(row["path_length_m"])
+              duration = float(row["duration_s"])
+              mean_body_increment = float(row["mean_body_increment_m"])
+              mean_orientation_increment = float(row["mean_orientation_increment_rad"])
+              runtime = float(row["runtime_ms_per_step"])
+
+              assert math.isfinite(position_rmse)
+              assert math.isfinite(orientation_error)
+              assert math.isfinite(runtime)
+              assert 0.0 <= coverage <= 1.0
+              assert 0.0 <= orientation_error <= math.pi
+              assert 0.0 < position_rmse < 3.0
+              assert path_length > 1.0
+              assert duration > 1.0
+              assert mean_body_increment > 0.0
+              assert mean_orientation_increment > 0.0
+              assert runtime > 0.0
+
+          print("EuRoC S3R3 pose smoke rows:", rows)
+          PY
+
       - name: Upload EuRoC smoke artifact
         uses: actions/upload-artifact@v7
         with:
           name: se3plusplus-s3f-euroc-mh01-smoke
-          path: ci_smoke/euroc_mh01_planar
+          path: ci_smoke

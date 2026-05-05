@@ -18,6 +18,12 @@ from .dynamic_robustness import (
     run_s3r3_dynamic_robustness_sweep,
     write_s3r3_dynamic_robustness_outputs,
 )
+from .euroc_pose import (
+    EuRoCS3R3PoseConfig,
+    EuRoCS3R3PoseResult,
+    run_euroc_s3r3_pose,
+    write_euroc_s3r3_pose_outputs,
+)
 from .highres_reference import (
     S3R3HighResReferenceConfig,
     run_s3r3_highres_reference_benchmark,
@@ -47,6 +53,8 @@ from .stress_sweep import (
 )
 
 __all__ = [
+    "EuRoCS3R3PoseConfig",
+    "EuRoCS3R3PoseResult",
     "S3R3EvidenceSummaryConfig",
     "S3R3EvidenceSummaryResult",
     "S3R3DynamicPoseConfig",
@@ -60,6 +68,7 @@ __all__ = [
     "S3R3PrototypeConfig",
     "S3R3StressSweepConfig",
     "S3R3StressSweepResult",
+    "run_euroc_s3r3_pose",
     "run_s3r3_evidence_summary",
     "run_s3r3_dynamic_pose_benchmark",
     "run_s3r3_dynamic_robustness_sweep",
@@ -68,6 +77,7 @@ __all__ = [
     "run_s3r3_particle_comparison",
     "run_s3r3_relaxed_prototype",
     "run_s3r3_stress_sweep",
+    "write_euroc_s3r3_pose_outputs",
     "write_s3r3_evidence_summary_outputs",
     "write_s3r3_dynamic_pose_outputs",
     "write_s3r3_dynamic_robustness_outputs",
