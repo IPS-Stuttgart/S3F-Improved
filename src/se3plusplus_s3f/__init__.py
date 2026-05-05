@@ -11,6 +11,7 @@ from .s3r3.dynamic_pose import S3R3DynamicPoseConfig, S3R3DynamicPoseResult, run
 from .s3r3.dynamic_robustness import S3R3DynamicRobustnessConfig, S3R3DynamicRobustnessResult, run_s3r3_dynamic_robustness_sweep
 from .s3r3.euroc_pose import EuRoCS3R3PoseConfig, EuRoCS3R3PoseResult, run_euroc_s3r3_pose
 from .s3r3.highres_reference import S3R3HighResReferenceConfig, run_s3r3_highres_reference_benchmark
+from .s3r3.manifold_ukf import SO3R3ManifoldUKFConfig, make_so3r3_manifold_ukf
 from .s3r3.orientation_basis import S3R3OrientationBasisConfig, run_s3r3_orientation_basis_diagnostic
 from .s3r3.particle_comparison import S3R3ParticleComparisonConfig, S3R3ParticleComparisonResult, run_s3r3_particle_comparison
 from .s3r3.relaxed_s3f_prototype import S3R3PrototypeConfig, run_s3r3_relaxed_prototype
@@ -34,6 +35,7 @@ __all__ = [
     "S3R3EvidenceSummaryConfig",
     "S3R3EvidenceSummaryResult",
     "S3R3HighResReferenceConfig",
+    "SO3R3ManifoldUKFConfig",
     "S3R3OrientationBasisConfig",
     "S3R3ParticleComparisonConfig",
     "S3R3ParticleComparisonResult",
@@ -41,6 +43,7 @@ __all__ = [
     "S3R3StressSweepConfig",
     "S3R3StressSweepResult",
     "load_pilot_config",
+    "make_so3r3_manifold_ukf",
     "run_baseline_comparison",
     "run_euroc_planar_relaxed_s3f",
     "run_euroc_s3r3_pose",
