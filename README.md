@@ -260,6 +260,14 @@ PyRecEst `UKFOnManifolds` baseline on `SO3 x R3` with a 6-D tangent covariance.
 se3plusplus-s3f euroc-s3r3-pose --groundtruth-path path/to/MH_01_easy.txt
 ```
 
+To stress the non-Gaussian orientation case, pass multiple initial yaw-offset
+modes. For example, this gives S3F a two-mode prior while the manifold UKF uses
+one tangent-Gaussian approximation to the same yaw ambiguity:
+
+```bash
+se3plusplus-s3f euroc-s3r3-pose --groundtruth-path path/to/MH_01_easy.txt --prior-yaw-offsets 0 3.141592653589793 --prior-weights 0.5 0.5
+```
+
 This writes variant metrics, claim rows, plots, metadata, and a short note to
 `results/euroc_s3r3_pose/`. The GitHub workflow
 `.github/workflows/euroc-mh01-smoke.yml` also runs this S3+ x R3 pose smoke

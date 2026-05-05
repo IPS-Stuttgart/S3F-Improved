@@ -58,6 +58,26 @@ def test_euroc_s3r3_pose_smoke_outputs_metrics_and_claims(tmp_path):
     assert metadata["config"]["grid_size"] == 8
 
 
+def test_euroc_s3r3_pose_accepts_multimodal_yaw_prior(tmp_path):
+    groundtruth_path = tmp_path / "groundtruth.txt"
+    _write_groundtruth(groundtruth_path, n_poses=7)
+    config = EuRoCS3R3PoseConfig(
+        grid_size=8,
+        stride=1,
+        max_steps=3,
+        cell_sample_count=8,
+        orientation_transition_kappa=24.0,
+        prior_yaw_offsets_rad=(0.0, np.pi),
+        prior_weights=(0.5, 0.5),
+    )
+
+    result = run_euroc_s3r3_pose(groundtruth_path, config)
+
+    assert {row["variant"] for row in result.metrics} == {"baseline", "r1", "r1_r2", "manifold_ukf"}
+    assert all(np.isfinite(float(row["position_rmse"])) for row in result.metrics)
+    assert len(result.claims) == 3
+
+
 def test_euroc_s3r3_pose_rejects_bad_slice(tmp_path):
     groundtruth_path = tmp_path / "groundtruth.txt"
     _write_groundtruth(groundtruth_path, n_poses=3)
@@ -73,6 +93,20 @@ def test_euroc_s3r3_pose_rejects_invalid_grid(tmp_path):
     config = EuRoCS3R3PoseConfig(grid_size=0, max_steps=1)
 
     with pytest.raises(ValueError, match="grid_size"):
+        run_euroc_s3r3_pose(groundtruth_path, config)
+
+
+def test_euroc_s3r3_pose_rejects_mismatched_prior_weights(tmp_path):
+    groundtruth_path = tmp_path / "groundtruth.txt"
+    _write_groundtruth(groundtruth_path, n_poses=4)
+    config = EuRoCS3R3PoseConfig(
+        grid_size=8,
+        max_steps=1,
+        prior_yaw_offsets_rad=(0.0, np.pi),
+        prior_weights=(1.0,),
+    )
+
+    with pytest.raises(ValueError, match="same length"):
         run_euroc_s3r3_pose(groundtruth_path, config)
 
 
