@@ -151,8 +151,8 @@ jobs:
 
           rows = list(csv.DictReader(metrics_path.open(newline="", encoding="utf-8")))
           claims = list(csv.DictReader(claims_path.open(newline="", encoding="utf-8")))
-          assert {row["variant"] for row in rows} == {"baseline", "r1", "r1_r2"}
-          assert len(claims) == 2
+          assert {row["variant"] for row in rows} == {"baseline", "r1", "r1_r2", "manifold_ukf"}
+          assert len(claims) == 3
           assert all(int(row["grid_size"]) == 16 for row in rows)
           assert all(int(row["n_steps"]) == 50 for row in rows)
 

@@ -186,6 +186,9 @@ def main() -> None:
             orientation_prior_kappa=args.orientation_prior_kappa,
             orientation_transition_kappa=args.orientation_transition_kappa,
             cell_sample_count=args.cell_sample_count,
+            include_manifold_ukf=not args.no_manifold_ukf,
+            ukf_alpha=args.ukf_alpha,
+            ukf_orientation_process_std=args.ukf_orientation_process_std,
         )
         outputs = write_euroc_s3r3_pose_outputs(
             groundtruth_path=args.groundtruth_path,
@@ -519,6 +522,9 @@ def _parse_args() -> argparse.Namespace:
     euroc_s3r3.add_argument("--orientation-prior-kappa", type=float, default=12.0)
     euroc_s3r3.add_argument("--orientation-transition-kappa", type=float, default=48.0)
     euroc_s3r3.add_argument("--cell-sample-count", type=int, default=27)
+    euroc_s3r3.add_argument("--ukf-alpha", type=float, default=0.5)
+    euroc_s3r3.add_argument("--ukf-orientation-process-std", type=float, default=0.10)
+    euroc_s3r3.add_argument("--no-manifold-ukf", action="store_true")
     euroc_s3r3.add_argument("--no-plots", action="store_true")
 
     s3r3 = subparsers.add_parser(

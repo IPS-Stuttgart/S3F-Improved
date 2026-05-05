@@ -33,9 +33,9 @@ def test_euroc_s3r3_pose_smoke_outputs_metrics_and_claims(tmp_path):
 
     result = run_euroc_s3r3_pose(groundtruth_path, config)
 
-    assert {row["variant"] for row in result.metrics} == {"baseline", "r1", "r1_r2"}
-    assert len(result.metrics) == 3
-    assert len(result.claims) == 2
+    assert {row["variant"] for row in result.metrics} == {"baseline", "r1", "r1_r2", "manifold_ukf"}
+    assert len(result.metrics) == 4
+    assert len(result.claims) == 3
     assert all(int(row["n_steps"]) == 3 for row in result.metrics)
     assert all(float(row["path_length_m"]) > 0.0 for row in result.metrics)
     assert all(np.isfinite(float(row["position_rmse"])) for row in result.metrics)
@@ -52,8 +52,8 @@ def test_euroc_s3r3_pose_smoke_outputs_metrics_and_claims(tmp_path):
         written_claims = list(csv.DictReader(file))
     metadata = json.loads(outputs["metadata"].read_text(encoding="utf-8"))
 
-    assert len(written_metrics) == 3
-    assert len(written_claims) == 2
+    assert len(written_metrics) == 4
+    assert len(written_claims) == 3
     assert metadata["experiment"] == "euroc_s3r3_pose"
     assert metadata["config"]["grid_size"] == 8
 

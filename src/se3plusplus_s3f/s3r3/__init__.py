@@ -29,6 +29,14 @@ from .highres_reference import (
     run_s3r3_highres_reference_benchmark,
     write_s3r3_highres_reference_outputs,
 )
+from .manifold_ukf import (
+    SO3R3ManifoldUKFConfig,
+    SO3R3PoseControl,
+    SO3R3PoseState,
+    make_so3r3_manifold_ukf,
+    predict_so3r3_manifold_ukf,
+    update_so3r3_manifold_ukf,
+)
 from .particle_comparison import (
     S3R3ParticleComparisonConfig,
     S3R3ParticleComparisonResult,
@@ -62,6 +70,9 @@ __all__ = [
     "S3R3DynamicRobustnessConfig",
     "S3R3DynamicRobustnessResult",
     "S3R3HighResReferenceConfig",
+    "SO3R3ManifoldUKFConfig",
+    "SO3R3PoseControl",
+    "SO3R3PoseState",
     "S3R3OrientationBasisConfig",
     "S3R3ParticleComparisonConfig",
     "S3R3ParticleComparisonResult",
@@ -77,6 +88,9 @@ __all__ = [
     "run_s3r3_particle_comparison",
     "run_s3r3_relaxed_prototype",
     "run_s3r3_stress_sweep",
+    "make_so3r3_manifold_ukf",
+    "predict_so3r3_manifold_ukf",
+    "update_so3r3_manifold_ukf",
     "write_euroc_s3r3_pose_outputs",
     "write_s3r3_evidence_summary_outputs",
     "write_s3r3_dynamic_pose_outputs",
