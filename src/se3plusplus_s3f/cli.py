@@ -20,6 +20,7 @@ from .s1r2.runtime_profile import RuntimeProfileConfig, write_s3f_runtime_profil
 from .s3r3.evidence_summary import S3R3EvidenceSummaryConfig, write_s3r3_evidence_summary_outputs
 from .s3r3.dynamic_pose import S3R3DynamicPoseConfig, write_s3r3_dynamic_pose_outputs
 from .s3r3.dynamic_robustness import S3R3DynamicRobustnessConfig, write_s3r3_dynamic_robustness_outputs
+from .s3r3.dynamic_highres_reference import S3R3DynamicHighResReferenceConfig, write_s3r3_dynamic_highres_reference_outputs
 from .s3r3.highres_reference import S3R3HighResReferenceConfig, write_s3r3_highres_reference_outputs
 from .s3r3.orientation_basis import S3R3OrientationBasisConfig, write_s3r3_orientation_basis_outputs
 from .s3r3.particle_comparison import S3R3ParticleComparisonConfig, write_s3r3_particle_comparison_outputs
@@ -271,6 +272,31 @@ def main() -> None:
             reference_grid_size=args.reference_grid_size,
         )
         outputs = write_s3r3_highres_reference_outputs(
+            output_dir=args.output_dir,
+            config=config,
+            write_plots=not args.no_plots,
+        )
+        for label, path in outputs.items():
+            print(f"Wrote {label}: {path}")
+        return
+
+    if args.command == "s3r3-dynamic-highres-reference":
+        default_body_increment = S3R3PrototypeConfig().body_increment
+        scaled_body_increment = tuple(value * args.body_increment_scale for value in default_body_increment)
+        config = S3R3DynamicHighResReferenceConfig(
+            prototype=S3R3PrototypeConfig(
+                grid_sizes=tuple(args.grid_sizes),
+                n_trials=args.trials,
+                n_steps=args.steps,
+                seed=args.seed,
+                body_increment=scaled_body_increment,
+                cell_sample_count=args.cell_sample_count,
+            ),
+            reference_grid_size=args.reference_grid_size,
+            orientation_increment=tuple(args.orientation_increment),
+            orientation_transition_kappa=args.orientation_transition_kappa,
+        )
+        outputs = write_s3r3_dynamic_highres_reference_outputs(
             output_dir=args.output_dir,
             config=config,
             write_plots=not args.no_plots,
@@ -561,6 +587,26 @@ def _parse_args() -> argparse.Namespace:
     s3r3_highres.add_argument("--seed", type=int, default=29)
     s3r3_highres.add_argument("--cell-sample-count", type=int, default=27)
     s3r3_highres.add_argument("--no-plots", action="store_true")
+
+    s3r3_dynamic_highres = subparsers.add_parser(
+        "s3r3-dynamic-highres-reference",
+        help="Compare dynamic S3+ x R3 relaxed variants against a denser dynamic baseline S3F reference.",
+    )
+    s3r3_dynamic_highres.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("results") / "s3r3_dynamic_highres_reference",
+    )
+    s3r3_dynamic_highres.add_argument("--grid-sizes", type=int, nargs="+", default=[8, 16, 32])
+    s3r3_dynamic_highres.add_argument("--reference-grid-size", type=int, default=64)
+    s3r3_dynamic_highres.add_argument("--trials", type=int, default=8)
+    s3r3_dynamic_highres.add_argument("--steps", type=int, default=8)
+    s3r3_dynamic_highres.add_argument("--seed", type=int, default=59)
+    s3r3_dynamic_highres.add_argument("--body-increment-scale", type=float, default=1.0)
+    s3r3_dynamic_highres.add_argument("--orientation-increment", type=float, nargs=3, default=[0.0, 0.18, 0.06])
+    s3r3_dynamic_highres.add_argument("--orientation-transition-kappa", type=float, default=24.0)
+    s3r3_dynamic_highres.add_argument("--cell-sample-count", type=int, default=27)
+    s3r3_dynamic_highres.add_argument("--no-plots", action="store_true")
 
     s3r3_evidence = subparsers.add_parser(
         "s3r3-evidence-summary",

@@ -1,0 +1,217 @@
+name: S3R3 Dynamic High-Resolution Reference
+
+permissions:
+  contents: read
+
+# jscpd:ignore-start
+on:
+  workflow_dispatch:
+    inputs:
+      grid_sizes:
+        description: Space-separated coarse quaternion grid sizes.
+        required: true
+        default: "8 16 32"
+        type: string
+      reference_grid_size:
+        description: Denser dynamic baseline S3F reference grid size.
+        required: true
+        default: 64
+        type: number
+      trials:
+        description: Synthetic trials used for each comparison row.
+        required: true
+        default: 8
+        type: number
+      steps:
+        description: Prediction/update steps in each trial.
+        required: true
+        default: 8
+        type: number
+      seed:
+        description: Random seed for synthetic trial generation.
+        required: true
+        default: 59
+        type: number
+      body_increment_scale:
+        description: Scale applied to the default body-frame displacement.
+        required: true
+        default: 1.0
+        type: number
+      orientation_increment:
+        description: Space-separated tangent-vector increment for q_next = q * exp(delta).
+        required: true
+        default: "0.0 0.18 0.06"
+        type: string
+      orientation_transition_kappa:
+        description: Soft grid-transition concentration for the known orientation increment.
+        required: true
+        default: 24.0
+        type: number
+      cell_sample_count:
+        description: Local tangent samples used for each quaternion cell.
+        required: true
+        default: 27
+        type: number
+      retention_days:
+        description: Days to retain the uploaded report artifact.
+        required: true
+        default: 30
+        type: number
+# jscpd:ignore-end
+
+concurrency:
+  group: s3r3-dynamic-highres-reference-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  s3r3-dynamic-highres-reference:
+    name: Build S3R3 dynamic high-resolution reference report
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      GRID_SIZES: ${{ inputs.grid_sizes }}
+      REFERENCE_GRID_SIZE: ${{ inputs.reference_grid_size }}
+      TRIALS: ${{ inputs.trials }}
+      STEPS: ${{ inputs.steps }}
+      SEED: ${{ inputs.seed }}
+      BODY_INCREMENT_SCALE: ${{ inputs.body_increment_scale }}
+      ORIENTATION_INCREMENT: ${{ inputs.orientation_increment }}
+      ORIENTATION_TRANSITION_KAPPA: ${{ inputs.orientation_transition_kappa }}
+      CELL_SAMPLE_COUNT: ${{ inputs.cell_sample_count }}
+      OUTPUT_DIR: results/s3r3_dynamic_highres_reference
+
+    steps:
+      # jscpd:ignore-start
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      # jscpd:ignore-end
+
+      # jscpd:ignore-start
+      - name: Run and validate dynamic high-resolution reference report
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          import math
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          def positive_int_list(name):
+              values = [int(token) for token in os.environ[name].split()]
+              if not values or min(values) <= 0:
+                  raise ValueError(f"{name} must contain positive integers.")
+              return values
+
+          def float_triplet(name):
+              values = [float(token) for token in os.environ[name].split()]
+              if len(values) != 3:
+                  raise ValueError(f"{name} must contain exactly three floats.")
+              return values
+
+          grid_sizes = positive_int_list("GRID_SIZES")
+          reference_grid_size = int(os.environ["REFERENCE_GRID_SIZE"])
+          if reference_grid_size <= max(grid_sizes):
+              raise ValueError("REFERENCE_GRID_SIZE must be greater than every coarse grid size.")
+          orientation_increment = float_triplet("ORIENTATION_INCREMENT")
+          for scalar_name in ("TRIALS", "STEPS", "SEED", "CELL_SAMPLE_COUNT"):
+              value = int(os.environ[scalar_name])
+              if value <= 0:
+                  raise ValueError(f"{scalar_name} must be positive.")
+          for scalar_name in ("BODY_INCREMENT_SCALE", "ORIENTATION_TRANSITION_KAPPA"):
+              value = float(os.environ[scalar_name])
+              if value <= 0.0:
+                  raise ValueError(f"{scalar_name} must be positive.")
+
+          command = [sys.executable, "-m", "se3plusplus_s3f.cli", "s3r3-dynamic-highres-reference"]
+          command.extend(["--grid-sizes", *(str(value) for value in grid_sizes)])
+          command.extend(["--reference-grid-size", str(reference_grid_size)])
+          command.extend(["--trials", os.environ["TRIALS"], "--steps", os.environ["STEPS"]])
+          command.extend(["--seed", os.environ["SEED"], "--body-increment-scale", os.environ["BODY_INCREMENT_SCALE"]])
+          command.extend(["--orientation-increment", *(str(value) for value in orientation_increment)])
+          command.extend(["--orientation-transition-kappa", os.environ["ORIENTATION_TRANSITION_KAPPA"]])
+          command.extend(["--cell-sample-count", os.environ["CELL_SAMPLE_COUNT"]])
+          command.extend(["--output-dir", os.environ["OUTPUT_DIR"]])
+          subprocess.run(command, check=True)
+
+          output_dir = Path(os.environ["OUTPUT_DIR"])
+          files = {
+              "metrics": output_dir / "s3r3_dynamic_highres_reference_metrics.csv",
+              "claims": output_dir / "s3r3_dynamic_highres_reference_claims.csv",
+              "metadata": output_dir / "run_metadata.json",
+              "note": output_dir / "s3r3_dynamic_highres_reference_note.md",
+              "ref_rmse_plot": output_dir / "s3r3_dynamic_position_rmse_to_reference.png",
+              "ref_gain_plot": output_dir / "s3r3_dynamic_reference_rmse_gain.png",
+              "nees_plot": output_dir / "s3r3_dynamic_highres_nees.png",
+              "runtime_plot": output_dir / "s3r3_dynamic_runtime_ratio_to_reference.png",
+          }
+          missing = [name for name, path in files.items() if not path.exists()]
+          if missing:
+              raise FileNotFoundError(missing)
+
+          metrics_rows = list(csv.DictReader(files["metrics"].open(newline="", encoding="utf-8")))
+          claim_rows = list(csv.DictReader(files["claims"].open(newline="", encoding="utf-8")))
+          expected_metrics = len(grid_sizes) * 3
+          expected_claims = len(grid_sizes) * 2
+          if len(metrics_rows) != expected_metrics:
+              raise AssertionError((len(metrics_rows), expected_metrics))
+          if len(claim_rows) != expected_claims:
+              raise AssertionError((len(claim_rows), expected_claims))
+
+          for row in metrics_rows:
+              if row["variant"] not in {"baseline", "r1", "r1_r2"}:
+                  raise AssertionError(row)
+              if int(row["reference_grid_size"]) != reference_grid_size:
+                  raise AssertionError(row)
+              if not 0.0 <= float(row["coverage_95_to_truth"]) <= 1.0:
+                  raise AssertionError(row)
+              for column in ("position_rmse_to_reference", "position_rmse_to_truth", "mean_nees_to_truth", "runtime_ratio_to_reference"):
+                  if not math.isfinite(float(row[column])):
+                      raise AssertionError(row)
+
+          for row in claim_rows:
+              if row["candidate_variant"] != "r1_r2":
+                  raise AssertionError(row)
+              for column in ("position_rmse_to_reference_ratio", "position_rmse_to_truth_ratio", "mean_nees_ratio", "runtime_ratio"):
+                  if not math.isfinite(float(row[column])):
+                      raise AssertionError(row)
+
+          metadata = json.loads(files["metadata"].read_text(encoding="utf-8"))
+          if metadata["experiment"] != "s3r3_dynamic_highres_reference":
+              raise AssertionError(metadata)
+          if metadata["metrics_rows"] != len(metrics_rows) or metadata["claims_rows"] != len(claim_rows):
+              raise AssertionError(metadata)
+
+          print(f"Validated {len(metrics_rows)} metric rows and {len(claim_rows)} claim rows.")
+          PY
+
+      - name: Write report summary
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          note = Path(os.environ["OUTPUT_DIR"]) / "s3r3_dynamic_highres_reference_note.md"
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(note.read_text(encoding="utf-8"), encoding="utf-8")
+          PY
+      # jscpd:ignore-end
+
+      - name: Upload S3R3 dynamic high-resolution reference artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: s3r3-dynamic-highres-reference-${{ github.run_number }}
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}

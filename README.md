@@ -182,6 +182,20 @@ se3plusplus-s3f s3r3-highres-reference
 This writes outputs to `results/s3r3_highres_reference/`. The reference is a
 denser baseline S3F quaternion grid, not an external filter.
 
+## Compare Dynamic S3R3 Against a High-Resolution Reference
+
+To test whether dynamic coarse relaxed propagation follows a denser dynamic
+baseline S3F reference:
+
+```bash
+se3plusplus-s3f s3r3-dynamic-highres-reference
+```
+
+This uses the same dynamic model as `s3r3-dynamic-pose` and compares each
+coarse baseline, `R1`, and `R1+R2` row against a denser dynamic baseline S3F.
+It writes metrics, claim rows, plots, metadata, and a short note to
+`results/s3r3_dynamic_highres_reference/`.
+
 ## Summarize S3R3 Evidence
 
 To combine direct relaxed S3R3 metrics and the high-resolution reference
