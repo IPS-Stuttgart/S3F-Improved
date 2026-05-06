@@ -9,6 +9,7 @@ from .s1r2.runtime_profile import RuntimeProfileConfig, run_s3f_runtime_profile
 from .s3r3.evidence_summary import S3R3EvidenceSummaryConfig, S3R3EvidenceSummaryResult, run_s3r3_evidence_summary
 from .s3r3.dynamic_pose import S3R3DynamicPoseConfig, S3R3DynamicPoseResult, run_s3r3_dynamic_pose_benchmark
 from .s3r3.dynamic_robustness import S3R3DynamicRobustnessConfig, S3R3DynamicRobustnessResult, run_s3r3_dynamic_robustness_sweep
+from .s3r3.dynamic_highres_reference import S3R3DynamicHighResReferenceConfig, S3R3DynamicHighResReferenceResult, run_s3r3_dynamic_highres_reference_benchmark
 from .s3r3.euroc_pose import EuRoCS3R3PoseConfig, EuRoCS3R3PoseResult, run_euroc_s3r3_pose
 from .s3r3.highres_reference import S3R3HighResReferenceConfig, run_s3r3_highres_reference_benchmark
 from .s3r3.manifold_ukf import SO3R3ManifoldUKFConfig, make_so3r3_manifold_ukf
@@ -32,6 +33,8 @@ __all__ = [
     "S3R3DynamicPoseResult",
     "S3R3DynamicRobustnessConfig",
     "S3R3DynamicRobustnessResult",
+    "S3R3DynamicHighResReferenceConfig",
+    "S3R3DynamicHighResReferenceResult",
     "S3R3EvidenceSummaryConfig",
     "S3R3EvidenceSummaryResult",
     "S3R3HighResReferenceConfig",
@@ -54,6 +57,7 @@ __all__ = [
     "run_s3r3_evidence_summary",
     "run_s3r3_dynamic_pose_benchmark",
     "run_s3r3_dynamic_robustness_sweep",
+    "run_s3r3_dynamic_highres_reference_benchmark",
     "run_s3r3_highres_reference_benchmark",
     "run_s3r3_orientation_basis_diagnostic",
     "run_s3r3_particle_comparison",
