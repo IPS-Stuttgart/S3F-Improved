@@ -21,6 +21,7 @@ from .s3r3.evidence_summary import S3R3EvidenceSummaryConfig, write_s3r3_evidenc
 from .s3r3.dynamic_pose import S3R3DynamicPoseConfig, write_s3r3_dynamic_pose_outputs
 from .s3r3.dynamic_robustness import S3R3DynamicRobustnessConfig, write_s3r3_dynamic_robustness_outputs
 from .s3r3.dynamic_highres_reference import S3R3DynamicHighResReferenceConfig, write_s3r3_dynamic_highres_reference_outputs
+from .s3r3.euroc_pose import EuRoCS3R3PoseConfig, write_euroc_s3r3_pose_outputs
 from .s3r3.highres_reference import S3R3HighResReferenceConfig, write_s3r3_highres_reference_outputs
 from .s3r3.orientation_basis import S3R3OrientationBasisConfig, write_s3r3_orientation_basis_outputs
 from .s3r3.particle_comparison import S3R3ParticleComparisonConfig, write_s3r3_particle_comparison_outputs
@@ -168,6 +169,35 @@ def main() -> None:
             groundtruth_path=args.groundtruth_path,
             output_dir=args.output_dir,
             config=config,
+        )
+        for label, path in outputs.items():
+            print(f"Wrote {label}: {path}")
+        return
+
+    if args.command == "euroc-s3r3-pose":
+        config = EuRoCS3R3PoseConfig(
+            grid_size=args.grid_size,
+            start_index=args.start_index,
+            stride=args.stride,
+            max_steps=args.steps,
+            seed=args.seed,
+            measurement_noise_std=args.measurement_noise_std,
+            process_noise_std=args.process_noise_std,
+            initial_position_std=args.initial_position_std,
+            orientation_prior_kappa=args.orientation_prior_kappa,
+            orientation_transition_kappa=args.orientation_transition_kappa,
+            cell_sample_count=args.cell_sample_count,
+            prior_yaw_offsets_rad=tuple(args.prior_yaw_offsets),
+            prior_weights=tuple(args.prior_weights),
+            include_manifold_ukf=not args.no_manifold_ukf,
+            ukf_alpha=args.ukf_alpha,
+            ukf_orientation_process_std=args.ukf_orientation_process_std,
+        )
+        outputs = write_euroc_s3r3_pose_outputs(
+            groundtruth_path=args.groundtruth_path,
+            output_dir=args.output_dir,
+            config=config,
+            write_plots=not args.no_plots,
         )
         for label, path in outputs.items():
             print(f"Wrote {label}: {path}")
@@ -498,6 +528,34 @@ def _parse_args() -> argparse.Namespace:
     euroc.add_argument("--process-noise-std", type=float, default=0.01)
     euroc.add_argument("--initial-position-std", type=float, default=0.08)
     euroc.add_argument("--orientation-prior-kappa", type=float, default=6.0)
+
+    euroc_s3r3 = subparsers.add_parser(
+        "euroc-s3r3-pose",
+        help="Run dynamic S3+ x R3 relaxed S3F on EuRoC 3D ground-truth pose increments.",
+    )
+    euroc_s3r3.add_argument("--groundtruth-path", type=Path, required=True)
+    euroc_s3r3.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("results") / "euroc_s3r3_pose",
+    )
+    euroc_s3r3.add_argument("--grid-size", type=int, default=16)
+    euroc_s3r3.add_argument("--start-index", type=int, default=0)
+    euroc_s3r3.add_argument("--stride", type=int, default=20)
+    euroc_s3r3.add_argument("--steps", type=int, default=50)
+    euroc_s3r3.add_argument("--seed", type=int, default=19)
+    euroc_s3r3.add_argument("--measurement-noise-std", type=float, default=0.05)
+    euroc_s3r3.add_argument("--process-noise-std", type=float, default=0.01)
+    euroc_s3r3.add_argument("--initial-position-std", type=float, default=0.08)
+    euroc_s3r3.add_argument("--orientation-prior-kappa", type=float, default=12.0)
+    euroc_s3r3.add_argument("--orientation-transition-kappa", type=float, default=48.0)
+    euroc_s3r3.add_argument("--cell-sample-count", type=int, default=27)
+    euroc_s3r3.add_argument("--prior-yaw-offsets", type=float, nargs="+", default=[0.0])
+    euroc_s3r3.add_argument("--prior-weights", type=float, nargs="+", default=[1.0])
+    euroc_s3r3.add_argument("--ukf-alpha", type=float, default=0.5)
+    euroc_s3r3.add_argument("--ukf-orientation-process-std", type=float, default=0.10)
+    euroc_s3r3.add_argument("--no-manifold-ukf", action="store_true")
+    euroc_s3r3.add_argument("--no-plots", action="store_true")
 
     s3r3 = subparsers.add_parser(
         "s3r3-relaxed",

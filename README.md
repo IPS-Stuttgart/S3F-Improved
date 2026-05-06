@@ -258,8 +258,35 @@ se3plusplus-s3f euroc-planar --groundtruth-path path/to/MH_01_easy.txt
 
 The GitHub workflow `.github/workflows/euroc-mh01-smoke.yml` downloads the
 `MH_01_easy` ground-truth text file from the DROID-SLAM EuRoC ground-truth
-mirror, verifies its SHA-256 checksum, caches it, runs the planar relaxed-S3F
-smoke test, and validates finite nontrivial metrics.
+mirror, verifies its SHA-256 checksum, caches it, runs the planar and S3+ x R3
+relaxed-S3F smoke tests, and validates finite nontrivial metrics.
+
+## Run a EuRoC S3+ x R3 Pose Smoke Test
+
+To use an existing 3-D trajectory before adding a full visual-inertial frontend,
+the EuRoC S3R3 smoke path reads the same ground-truth pose file and derives
+known body-frame translation controls plus quaternion increments from successive
+poses. Position measurements are simulated by adding Gaussian noise to the
+ground-truth positions. The report includes baseline S3F, `R1`, `R1+R2`, and a
+PyRecEst `UKFOnManifolds` baseline on `SO3 x R3` with a 6-D tangent covariance.
+
+```bash
+se3plusplus-s3f euroc-s3r3-pose --groundtruth-path path/to/MH_01_easy.txt
+```
+
+To stress the non-Gaussian orientation case, pass multiple initial yaw-offset
+modes. For example, this gives S3F a two-mode prior while the manifold UKF uses
+one tangent-Gaussian approximation to the same yaw ambiguity:
+
+```bash
+se3plusplus-s3f euroc-s3r3-pose --groundtruth-path path/to/MH_01_easy.txt --prior-yaw-offsets 0 3.141592653589793 --prior-weights 0.5 0.5
+```
+
+This writes variant metrics, claim rows, plots, metadata, and a short note to
+`results/euroc_s3r3_pose/`. The GitHub workflow
+`.github/workflows/euroc-mh01-smoke.yml` also runs this S3+ x R3 pose smoke
+test on the cached `MH_01_easy` file and uploads the generated outputs as an
+Actions artifact.
 
 ## Test
 

@@ -24,10 +24,24 @@ from .dynamic_highres_reference import (
     run_s3r3_dynamic_highres_reference_benchmark,
     write_s3r3_dynamic_highres_reference_outputs,
 )
+from .euroc_pose import (
+    EuRoCS3R3PoseConfig,
+    EuRoCS3R3PoseResult,
+    run_euroc_s3r3_pose,
+    write_euroc_s3r3_pose_outputs,
+)
 from .highres_reference import (
     S3R3HighResReferenceConfig,
     run_s3r3_highres_reference_benchmark,
     write_s3r3_highres_reference_outputs,
+)
+from .manifold_ukf import (
+    SO3R3ManifoldUKFConfig,
+    SO3R3PoseControl,
+    SO3R3PoseState,
+    make_so3r3_manifold_ukf,
+    predict_so3r3_manifold_ukf,
+    update_so3r3_manifold_ukf,
 )
 from .particle_comparison import (
     S3R3ParticleComparisonConfig,
@@ -53,6 +67,8 @@ from .stress_sweep import (
 )
 
 __all__ = [
+    "EuRoCS3R3PoseConfig",
+    "EuRoCS3R3PoseResult",
     "S3R3EvidenceSummaryConfig",
     "S3R3EvidenceSummaryResult",
     "S3R3DynamicPoseConfig",
@@ -62,12 +78,16 @@ __all__ = [
     "S3R3DynamicHighResReferenceConfig",
     "S3R3DynamicHighResReferenceResult",
     "S3R3HighResReferenceConfig",
+    "SO3R3ManifoldUKFConfig",
+    "SO3R3PoseControl",
+    "SO3R3PoseState",
     "S3R3OrientationBasisConfig",
     "S3R3ParticleComparisonConfig",
     "S3R3ParticleComparisonResult",
     "S3R3PrototypeConfig",
     "S3R3StressSweepConfig",
     "S3R3StressSweepResult",
+    "run_euroc_s3r3_pose",
     "run_s3r3_evidence_summary",
     "run_s3r3_dynamic_pose_benchmark",
     "run_s3r3_dynamic_robustness_sweep",
@@ -77,6 +97,10 @@ __all__ = [
     "run_s3r3_particle_comparison",
     "run_s3r3_relaxed_prototype",
     "run_s3r3_stress_sweep",
+    "make_so3r3_manifold_ukf",
+    "predict_so3r3_manifold_ukf",
+    "update_so3r3_manifold_ukf",
+    "write_euroc_s3r3_pose_outputs",
     "write_s3r3_evidence_summary_outputs",
     "write_s3r3_dynamic_pose_outputs",
     "write_s3r3_dynamic_robustness_outputs",
