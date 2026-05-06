@@ -288,6 +288,24 @@ This writes variant metrics, claim rows, plots, metadata, and a short note to
 test on the cached `MH_01_easy` file and uploads the generated outputs as an
 Actions artifact.
 
+## Run a EuRoC S3+ x R3 Comparison Report
+
+For paper-facing evidence, the EuRoC comparison report runs coarse baseline,
+`R1`, and `R1+R2` S3F rows against a denser dynamic baseline S3F reference on
+the same EuRoC controls and simulated position measurements. It also includes
+the manifold UKF and an optional bootstrap particle filter row for runtime and
+accuracy context.
+
+```bash
+se3plusplus-s3f euroc-s3r3-comparison-report --groundtruth-path path/to/MH_01_easy.txt
+```
+
+This writes metrics, claim rows, five plots, metadata, and a note to
+`results/euroc_s3r3_comparison/`. The manual GitHub workflow
+`.github/workflows/euroc-s3r3-comparison-report.yml` downloads and caches the
+same EuRoC ground-truth file, validates the report outputs, and uploads the
+CSV/PNG/Markdown files as an Actions artifact.
+
 ## Test
 
 ```bash
