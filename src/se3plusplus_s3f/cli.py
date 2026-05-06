@@ -186,6 +186,8 @@ def main() -> None:
             orientation_prior_kappa=args.orientation_prior_kappa,
             orientation_transition_kappa=args.orientation_transition_kappa,
             cell_sample_count=args.cell_sample_count,
+            prior_yaw_offsets_rad=tuple(args.prior_yaw_offsets),
+            prior_weights=tuple(args.prior_weights),
             include_manifold_ukf=not args.no_manifold_ukf,
             ukf_alpha=args.ukf_alpha,
             ukf_orientation_process_std=args.ukf_orientation_process_std,
@@ -522,6 +524,8 @@ def _parse_args() -> argparse.Namespace:
     euroc_s3r3.add_argument("--orientation-prior-kappa", type=float, default=12.0)
     euroc_s3r3.add_argument("--orientation-transition-kappa", type=float, default=48.0)
     euroc_s3r3.add_argument("--cell-sample-count", type=int, default=27)
+    euroc_s3r3.add_argument("--prior-yaw-offsets", type=float, nargs="+", default=[0.0])
+    euroc_s3r3.add_argument("--prior-weights", type=float, nargs="+", default=[1.0])
     euroc_s3r3.add_argument("--ukf-alpha", type=float, default=0.5)
     euroc_s3r3.add_argument("--ukf-orientation-process-std", type=float, default=0.10)
     euroc_s3r3.add_argument("--no-manifold-ukf", action="store_true")

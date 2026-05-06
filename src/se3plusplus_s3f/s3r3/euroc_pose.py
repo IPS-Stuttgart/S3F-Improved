@@ -118,6 +118,8 @@ class EuRoCS3R3PoseConfig:
     orientation_prior_kappa: float = 12.0
     orientation_transition_kappa: float = 48.0
     cell_sample_count: int = 27
+    prior_yaw_offsets_rad: tuple[float, ...] = (0.0,)
+    prior_weights: tuple[float, ...] = (1.0,)
     include_manifold_ukf: bool = True
     ukf_alpha: float = 0.5
     ukf_orientation_process_std: float = 0.10
@@ -245,6 +247,13 @@ def _validate_config(config: EuRoCS3R3PoseConfig) -> None:
         raise ValueError("orientation_transition_kappa must be positive.")
     if config.ukf_alpha <= 0.0:
         raise ValueError("ukf_alpha must be positive.")
+    if len(config.prior_yaw_offsets_rad) == 0:
+        raise ValueError("prior_yaw_offsets_rad must not be empty.")
+    if len(config.prior_yaw_offsets_rad) != len(config.prior_weights):
+        raise ValueError("prior_yaw_offsets_rad and prior_weights must have the same length.")
+    prior_weights = np.asarray(config.prior_weights, dtype=float)
+    if np.any(prior_weights < 0.0) or float(np.sum(prior_weights)) <= 0.0:
+        raise ValueError("prior_weights must be nonnegative with positive sum.")
     for name, value in (
         ("measurement_noise_std", config.measurement_noise_std),
         ("process_noise_std", config.process_noise_std),
@@ -367,12 +376,12 @@ def _run_manifold_ukf_variant(
 ) -> dict[str, float | int | str]:
     filter_ = make_so3r3_manifold_ukf(
         trajectory.positions[0],
-        trajectory.quaternions[0],
+        _ukf_initial_orientation(trajectory.quaternions[0], config),
         SO3R3ManifoldUKFConfig(
             measurement_noise_std=config.measurement_noise_std,
             process_noise_std=config.process_noise_std,
             initial_position_std=config.initial_position_std,
-            initial_orientation_std=float(np.sqrt(2.0 / config.orientation_prior_kappa)),
+            initial_orientation_std=_ukf_initial_orientation_std(config),
             orientation_process_std=config.ukf_orientation_process_std,
             alpha=config.ukf_alpha,
         ),
@@ -424,6 +433,63 @@ def _run_manifold_ukf_variant(
     }
 
 
+def _initial_prior_modes(
+    initial_orientation: np.ndarray,
+    config: EuRoCS3R3PoseConfig,
+) -> tuple[tuple[float, float, float, float], ...]:
+    return tuple(
+        tuple(float(value) for value in _yaw_offset_orientation(initial_orientation, yaw_offset))
+        for yaw_offset in config.prior_yaw_offsets_rad
+    )
+
+
+def _normalized_prior_weights(config: EuRoCS3R3PoseConfig) -> tuple[float, ...]:
+    weights = np.asarray(config.prior_weights, dtype=float)
+    weights = weights / np.sum(weights)
+    return tuple(float(value) for value in weights)
+
+
+def _ukf_initial_orientation(
+    initial_orientation: np.ndarray,
+    config: EuRoCS3R3PoseConfig,
+) -> np.ndarray:
+    mean_offset = _weighted_yaw_offset_mean(config)
+    return _yaw_offset_orientation(initial_orientation, mean_offset)
+
+
+def _ukf_initial_orientation_std(config: EuRoCS3R3PoseConfig) -> float:
+    local_std = float(np.sqrt(2.0 / config.orientation_prior_kappa))
+    mode_std = _weighted_yaw_offset_std(config, _weighted_yaw_offset_mean(config))
+    return max(local_std, mode_std, 1e-6)
+
+
+def _weighted_yaw_offset_mean(config: EuRoCS3R3PoseConfig) -> float:
+    offsets = np.asarray(config.prior_yaw_offsets_rad, dtype=float)
+    weights = np.asarray(_normalized_prior_weights(config), dtype=float)
+    sin_sum = float(np.sum(weights * np.sin(offsets)))
+    cos_sum = float(np.sum(weights * np.cos(offsets)))
+    if np.hypot(sin_sum, cos_sum) > 1e-12:
+        return float(np.arctan2(sin_sum, cos_sum))
+    return float(np.average(np.unwrap(offsets), weights=weights))
+
+
+def _weighted_yaw_offset_std(config: EuRoCS3R3PoseConfig, mean_offset: float) -> float:
+    offsets = np.asarray(config.prior_yaw_offsets_rad, dtype=float)
+    weights = np.asarray(_normalized_prior_weights(config), dtype=float)
+    residuals = np.angle(np.exp(1j * (offsets - mean_offset)))
+    return float(np.sqrt(np.sum(weights * residuals**2)))
+
+
+def _yaw_offset_orientation(initial_orientation: np.ndarray, yaw_offset: float) -> np.ndarray:
+    return _quaternion_multiply(_canonical_quaternions(initial_orientation), _yaw_quaternion(yaw_offset))
+
+
+def _yaw_quaternion(yaw_offset: float) -> np.ndarray:
+    return _canonical_quaternions(
+        np.array([0.0, 0.0, np.sin(0.5 * yaw_offset), np.cos(0.5 * yaw_offset)], dtype=float)
+    )
+
+
 def _make_initial_filter(
     initial_position: np.ndarray,
     initial_orientation: np.ndarray,
@@ -438,8 +504,8 @@ def _make_initial_filter(
         measurement_noise_std=config.measurement_noise_std,
         process_noise_std=config.process_noise_std,
         initial_position_std=config.initial_position_std,
-        prior_modes=(tuple(float(value) for value in _canonical_quaternions(initial_orientation)),),
-        prior_weights=(1.0,),
+        prior_modes=_initial_prior_modes(initial_orientation, config),
+        prior_weights=_normalized_prior_weights(config),
         prior_kappa=config.orientation_prior_kappa,
         cell_sample_count=config.cell_sample_count,
     )
@@ -562,6 +628,8 @@ def _write_note(
         f"Steps: {config.max_steps}",
         f"Stride: {config.stride}",
         f"Cell sample count: {config.cell_sample_count}",
+        f"Prior yaw offsets rad: {list(config.prior_yaw_offsets_rad)}",
+        f"Prior weights: {list(_normalized_prior_weights(config))}",
         f"Manifold UKF included: {config.include_manifold_ukf}",
         f"Metrics: `{metrics_path.name}`",
         f"Claims: `{claims_path.name}`",
