@@ -21,6 +21,7 @@ from .s3r3.evidence_summary import S3R3EvidenceSummaryConfig, write_s3r3_evidenc
 from .s3r3.dynamic_pose import S3R3DynamicPoseConfig, write_s3r3_dynamic_pose_outputs
 from .s3r3.dynamic_robustness import S3R3DynamicRobustnessConfig, write_s3r3_dynamic_robustness_outputs
 from .s3r3.dynamic_highres_reference import S3R3DynamicHighResReferenceConfig, write_s3r3_dynamic_highres_reference_outputs
+from .s3r3.euroc_comparison_report import EuRoCS3R3ComparisonReportConfig, write_euroc_s3r3_comparison_report_outputs
 from .s3r3.euroc_pose import EuRoCS3R3PoseConfig, write_euroc_s3r3_pose_outputs
 from .s3r3.highres_reference import S3R3HighResReferenceConfig, write_s3r3_highres_reference_outputs
 from .s3r3.orientation_basis import S3R3OrientationBasisConfig, write_s3r3_orientation_basis_outputs
@@ -194,6 +195,40 @@ def main() -> None:
             ukf_orientation_process_std=args.ukf_orientation_process_std,
         )
         outputs = write_euroc_s3r3_pose_outputs(
+            groundtruth_path=args.groundtruth_path,
+            output_dir=args.output_dir,
+            config=config,
+            write_plots=not args.no_plots,
+        )
+        for label, path in outputs.items():
+            print(f"Wrote {label}: {path}")
+        return
+
+    if args.command == "euroc-s3r3-comparison-report":
+        particle_counts = () if args.no_particle_filter else tuple(args.particle_counts)
+        config = EuRoCS3R3ComparisonReportConfig(
+            grid_sizes=tuple(args.grid_sizes),
+            variants=tuple(args.variants),
+            reference_grid_size=args.reference_grid_size,
+            start_index=args.start_index,
+            stride=args.stride,
+            max_steps=args.steps,
+            seed=args.seed,
+            measurement_noise_std=args.measurement_noise_std,
+            process_noise_std=args.process_noise_std,
+            initial_position_std=args.initial_position_std,
+            orientation_prior_kappa=args.orientation_prior_kappa,
+            orientation_transition_kappa=args.orientation_transition_kappa,
+            cell_sample_count=args.cell_sample_count,
+            prior_yaw_offsets_rad=tuple(args.prior_yaw_offsets),
+            prior_weights=tuple(args.prior_weights),
+            include_manifold_ukf=not args.no_manifold_ukf,
+            ukf_alpha=args.ukf_alpha,
+            ukf_orientation_process_std=args.ukf_orientation_process_std,
+            particle_counts=particle_counts,
+            particle_resample_threshold=args.particle_resample_threshold,
+        )
+        outputs = write_euroc_s3r3_comparison_report_outputs(
             groundtruth_path=args.groundtruth_path,
             output_dir=args.output_dir,
             config=config,
@@ -556,6 +591,39 @@ def _parse_args() -> argparse.Namespace:
     euroc_s3r3.add_argument("--ukf-orientation-process-std", type=float, default=0.10)
     euroc_s3r3.add_argument("--no-manifold-ukf", action="store_true")
     euroc_s3r3.add_argument("--no-plots", action="store_true")
+
+    euroc_s3r3_report = subparsers.add_parser(
+        "euroc-s3r3-comparison-report",
+        help="Run EuRoC S3+ x R3 S3F variants against a high-resolution S3F reference, UKF, and PF.",
+    )
+    euroc_s3r3_report.add_argument("--groundtruth-path", type=Path, required=True)
+    euroc_s3r3_report.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("results") / "euroc_s3r3_comparison",
+    )
+    euroc_s3r3_report.add_argument("--grid-sizes", type=int, nargs="+", default=[8, 16, 32])
+    euroc_s3r3_report.add_argument("--variants", nargs="+", default=["baseline", "r1", "r1_r2"])
+    euroc_s3r3_report.add_argument("--reference-grid-size", type=int, default=64)
+    euroc_s3r3_report.add_argument("--start-index", type=int, default=0)
+    euroc_s3r3_report.add_argument("--stride", type=int, default=20)
+    euroc_s3r3_report.add_argument("--steps", type=int, default=50)
+    euroc_s3r3_report.add_argument("--seed", type=int, default=19)
+    euroc_s3r3_report.add_argument("--measurement-noise-std", type=float, default=0.05)
+    euroc_s3r3_report.add_argument("--process-noise-std", type=float, default=0.01)
+    euroc_s3r3_report.add_argument("--initial-position-std", type=float, default=0.08)
+    euroc_s3r3_report.add_argument("--orientation-prior-kappa", type=float, default=12.0)
+    euroc_s3r3_report.add_argument("--orientation-transition-kappa", type=float, default=48.0)
+    euroc_s3r3_report.add_argument("--cell-sample-count", type=int, default=27)
+    euroc_s3r3_report.add_argument("--prior-yaw-offsets", type=float, nargs="+", default=[0.0])
+    euroc_s3r3_report.add_argument("--prior-weights", type=float, nargs="+", default=[1.0])
+    euroc_s3r3_report.add_argument("--ukf-alpha", type=float, default=0.5)
+    euroc_s3r3_report.add_argument("--ukf-orientation-process-std", type=float, default=0.10)
+    euroc_s3r3_report.add_argument("--particle-counts", type=int, nargs="+", default=[128])
+    euroc_s3r3_report.add_argument("--particle-resample-threshold", type=float, default=0.5)
+    euroc_s3r3_report.add_argument("--no-manifold-ukf", action="store_true")
+    euroc_s3r3_report.add_argument("--no-particle-filter", action="store_true")
+    euroc_s3r3_report.add_argument("--no-plots", action="store_true")
 
     s3r3 = subparsers.add_parser(
         "s3r3-relaxed",

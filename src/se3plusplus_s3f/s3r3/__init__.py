@@ -24,6 +24,12 @@ from .dynamic_highres_reference import (
     run_s3r3_dynamic_highres_reference_benchmark,
     write_s3r3_dynamic_highres_reference_outputs,
 )
+from .euroc_comparison_report import (
+    EuRoCS3R3ComparisonReportConfig,
+    EuRoCS3R3ComparisonReportResult,
+    run_euroc_s3r3_comparison_report,
+    write_euroc_s3r3_comparison_report_outputs,
+)
 from .euroc_pose import (
     EuRoCS3R3PoseConfig,
     EuRoCS3R3PoseResult,
@@ -69,6 +75,8 @@ from .stress_sweep import (
 __all__ = [
     "EuRoCS3R3PoseConfig",
     "EuRoCS3R3PoseResult",
+    "EuRoCS3R3ComparisonReportConfig",
+    "EuRoCS3R3ComparisonReportResult",
     "S3R3EvidenceSummaryConfig",
     "S3R3EvidenceSummaryResult",
     "S3R3DynamicPoseConfig",
@@ -87,6 +95,7 @@ __all__ = [
     "S3R3PrototypeConfig",
     "S3R3StressSweepConfig",
     "S3R3StressSweepResult",
+    "run_euroc_s3r3_comparison_report",
     "run_euroc_s3r3_pose",
     "run_s3r3_evidence_summary",
     "run_s3r3_dynamic_pose_benchmark",
@@ -100,6 +109,7 @@ __all__ = [
     "make_so3r3_manifold_ukf",
     "predict_so3r3_manifold_ukf",
     "update_so3r3_manifold_ukf",
+    "write_euroc_s3r3_comparison_report_outputs",
     "write_euroc_s3r3_pose_outputs",
     "write_s3r3_evidence_summary_outputs",
     "write_s3r3_dynamic_pose_outputs",

@@ -1,0 +1,217 @@
+name: EuRoC S3R3 Comparison Report
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      grid_sizes:
+        description: Space-separated coarse quaternion grid sizes.
+        required: true
+        default: "8 16 32"
+        type: string
+      reference_grid_size:
+        description: High-resolution baseline S3F grid size.
+        required: true
+        default: 64
+        type: number
+      steps:
+        description: Prediction/update steps in the EuRoC segment.
+        required: true
+        default: 50
+        type: number
+      stride:
+        description: EuRoC ground-truth row stride.
+        required: true
+        default: 20
+        type: number
+      seed:
+        description: Random seed for simulated position measurements and PF samples.
+        required: true
+        default: 19
+        type: number
+      particle_counts:
+        description: Space-separated bootstrap particle counts.
+        required: true
+        default: "128"
+        type: string
+      orientation_transition_kappa:
+        description: Soft grid-transition concentration for known quaternion increments.
+        required: true
+        default: 48.0
+        type: number
+      cell_sample_count:
+        description: Local tangent samples used for each quaternion cell.
+        required: true
+        default: 27
+        type: number
+      retention_days:
+        description: Days to retain the uploaded report artifact.
+        required: true
+        default: 30
+        type: number
+
+concurrency:
+  group: euroc-s3r3-comparison-report-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  EUROC_MH01_URL: https://raw.githubusercontent.com/princeton-vl/DROID-SLAM/main/data/euroc_groundtruth/MH_01_easy.txt
+  EUROC_MH01_PATH: data/euroc/MH_01_easy.txt
+  EUROC_MH01_SHA256: 7aee4858338a3e880375ee51c18c120c5aa565616d62e9036e994924b31d9c48
+  GRID_SIZES: ${{ inputs.grid_sizes }}
+  REFERENCE_GRID_SIZE: ${{ inputs.reference_grid_size }}
+  STEPS: ${{ inputs.steps }}
+  STRIDE: ${{ inputs.stride }}
+  SEED: ${{ inputs.seed }}
+  PARTICLE_COUNTS: ${{ inputs.particle_counts }}
+  ORIENTATION_TRANSITION_KAPPA: ${{ inputs.orientation_transition_kappa }}
+  CELL_SAMPLE_COUNT: ${{ inputs.cell_sample_count }}
+  OUTPUT_DIR: results/euroc_s3r3_comparison
+
+jobs:
+  euroc-s3r3-comparison:
+    name: Build EuRoC S3R3 comparison report
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Restore cached EuRoC trajectory
+        id: cache-euroc
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.EUROC_MH01_PATH }}
+          key: euroc-mh01-groundtruth-${{ env.EUROC_MH01_SHA256 }}
+
+      - name: Download EuRoC MH01 ground-truth trajectory
+        if: steps.cache-euroc.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$(dirname "${EUROC_MH01_PATH}")"
+          curl --fail --location --retry 4 --retry-delay 10 \
+            --output "${EUROC_MH01_PATH}" \
+            "${EUROC_MH01_URL}"
+
+      - name: Verify EuRoC trajectory checksum
+        run: |
+          echo "${EUROC_MH01_SHA256}  ${EUROC_MH01_PATH}" | sha256sum --check
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run and validate EuRoC S3R3 comparison report
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          import math
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          def positive_int_list(name):
+              values = [int(token) for token in os.environ[name].split()]
+              if not values or min(values) <= 0:
+                  raise ValueError(f"{name} must contain positive integers.")
+              return values
+
+          grid_sizes = positive_int_list("GRID_SIZES")
+          particle_counts = positive_int_list("PARTICLE_COUNTS")
+          reference_grid_size = int(os.environ["REFERENCE_GRID_SIZE"])
+          if reference_grid_size <= max(grid_sizes):
+              raise ValueError("REFERENCE_GRID_SIZE must be greater than every coarse grid size.")
+          for scalar_name in ("STEPS", "STRIDE", "SEED", "CELL_SAMPLE_COUNT"):
+              value = int(os.environ[scalar_name])
+              if value <= 0:
+                  raise ValueError(f"{scalar_name} must be positive.")
+          if float(os.environ["ORIENTATION_TRANSITION_KAPPA"]) <= 0.0:
+              raise ValueError("ORIENTATION_TRANSITION_KAPPA must be positive.")
+
+          command = [sys.executable, "-m", "se3plusplus_s3f.cli", "euroc-s3r3-comparison-report"]
+          command.extend(["--groundtruth-path", os.environ["EUROC_MH01_PATH"]])
+          command.extend(["--grid-sizes", *(str(value) for value in grid_sizes)])
+          command.extend(["--reference-grid-size", str(reference_grid_size)])
+          command.extend(["--steps", os.environ["STEPS"], "--stride", os.environ["STRIDE"]])
+          command.extend(["--seed", os.environ["SEED"]])
+          command.extend(["--orientation-transition-kappa", os.environ["ORIENTATION_TRANSITION_KAPPA"]])
+          command.extend(["--cell-sample-count", os.environ["CELL_SAMPLE_COUNT"]])
+          command.extend(["--particle-counts", *(str(value) for value in particle_counts)])
+          command.extend(["--output-dir", os.environ["OUTPUT_DIR"]])
+          subprocess.run(command, check=True)
+
+          output_dir = Path(os.environ["OUTPUT_DIR"])
+          files = {
+              "metrics": output_dir / "euroc_s3r3_comparison_metrics.csv",
+              "claims": output_dir / "euroc_s3r3_comparison_claims.csv",
+              "metadata": output_dir / "run_metadata.json",
+              "note": output_dir / "euroc_s3r3_comparison_note.md",
+              "reference_rmse_plot": output_dir / "euroc_s3r3_reference_rmse.png",
+              "truth_rmse_plot": output_dir / "euroc_s3r3_truth_rmse.png",
+              "nees_plot": output_dir / "euroc_s3r3_nees.png",
+              "runtime_plot": output_dir / "euroc_s3r3_runtime.png",
+              "gain_plot": output_dir / "euroc_s3r3_reference_gain.png",
+          }
+          missing = [name for name, path in files.items() if not path.exists()]
+          if missing:
+              raise FileNotFoundError(missing)
+
+          metrics_rows = list(csv.DictReader(files["metrics"].open(newline="", encoding="utf-8")))
+          claim_rows = list(csv.DictReader(files["claims"].open(newline="", encoding="utf-8")))
+          expected_metrics = 1 + len(grid_sizes) * 3 + 1 + len(particle_counts)
+          expected_claims = len(grid_sizes) * 2 + 1 + len(particle_counts)
+          if len(metrics_rows) != expected_metrics:
+              raise AssertionError((len(metrics_rows), expected_metrics))
+          if len(claim_rows) != expected_claims:
+              raise AssertionError((len(claim_rows), expected_claims))
+
+          for row in metrics_rows:
+              if int(row["reference_grid_size"]) != reference_grid_size:
+                  raise AssertionError(row)
+              if not 0.0 <= float(row["coverage_95_to_truth"]) <= 1.0:
+                  raise AssertionError(row)
+              for column in ("position_rmse_to_truth", "position_rmse_to_reference", "mean_nees_to_truth", "runtime_ms_per_step"):
+                  if not math.isfinite(float(row[column])):
+                      raise AssertionError(row)
+
+          for row in claim_rows:
+              for column in ("position_rmse_to_reference_ratio", "position_rmse_to_truth_ratio", "mean_nees_ratio", "runtime_ratio"):
+                  if not math.isfinite(float(row[column])):
+                      raise AssertionError(row)
+
+          metadata = json.loads(files["metadata"].read_text(encoding="utf-8"))
+          if metadata["experiment"] != "euroc_s3r3_comparison_report":
+              raise AssertionError(metadata)
+          if metadata["metrics_rows"] != len(metrics_rows) or metadata["claims_rows"] != len(claim_rows):
+              raise AssertionError(metadata)
+
+          print(f"Validated {len(metrics_rows)} metric rows and {len(claim_rows)} claim rows.")
+          PY
+
+      - name: Write report summary
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          note = Path(os.environ["OUTPUT_DIR"]) / "euroc_s3r3_comparison_note.md"
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(note.read_text(encoding="utf-8"), encoding="utf-8")
+          PY
+
+      - name: Upload EuRoC S3R3 comparison artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: euroc-s3r3-comparison-${{ github.run_number }}
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
