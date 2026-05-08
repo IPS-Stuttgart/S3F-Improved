@@ -5,6 +5,7 @@
   "minLines": 10,
   "minTokens": 120,
   "ignore": [
+    "**/.github/workflows/**",
     ".github/workflows/**/*.yml",
     ".github/workflows/**/*.yaml"
   ]
