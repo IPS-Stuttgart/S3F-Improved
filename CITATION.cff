@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+message: "If you use S3F-Improved, please cite it using the metadata below."
+title: "S3F-Improved: Multiresolution Rao-Blackwellized grid-filter experiments for SE(3)"
+type: software
+authors:
+  - family-names: "Pfaff"
+    given-names: "Florian"
+    affiliation: "Institute of Industrial Automation and Software Engineering (IAS), University of Stuttgart"
+    email: "pfaff@ias.uni-stuttgart.de"
+repository-code: "https://github.com/IPS-Stuttgart/S3F-Improved"
+url: "https://github.com/IPS-Stuttgart/S3F-Improved"
+version: "0.0.1"
+license: "MIT"
+abstract: >
+  S3F-Improved contains experiment-specific code for multiresolution
+  Rao-Blackwellized grid filters on SE(3) and related relaxed state spaces,
+  starting with S1 x R2 pilot studies and smoke-test workflows for localization
+  benchmarks.
+keywords:
+  - SE(3)
+  - grid filtering
+  - Rao-Blackwellization
+  - localization
+  - state estimation
+preferred-citation:
+  type: software
+  title: "S3F-Improved: Multiresolution Rao-Blackwellized grid-filter experiments for SE(3)"
+  authors:
+    - family-names: "Pfaff"
+      given-names: "Florian"
+  year: 2026
+  url: "https://github.com/IPS-Stuttgart/S3F-Improved"
+  license: "MIT"
