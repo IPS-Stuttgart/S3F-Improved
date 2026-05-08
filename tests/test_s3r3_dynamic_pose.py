@@ -2,6 +2,7 @@ import csv
 import json
 
 import numpy as np
+from pyrecest.filters import so3_right_multiplication_grid_transition
 
 from se3plusplus_s3f.s3r3.dynamic_pose import (
     S3R3DynamicPoseConfig,
@@ -23,11 +24,17 @@ def test_s3r3_orientation_transition_density_is_column_normalized():
     grid = np.asarray(filter_.filter_state.gd.get_grid(), dtype=float)
 
     transition = s3r3_orientation_transition_density(grid, (0.0, 0.18, 0.06), 24.0)
+    expected_transition = so3_right_multiplication_grid_transition(
+        grid,
+        (0.0, 0.18, 0.06),
+        24.0,
+    )
 
     s3_hemisphere_surface = np.pi**2
     column_integrals = np.mean(transition.grid_values, axis=0) * s3_hemisphere_surface
     np.testing.assert_allclose(column_integrals, np.ones(grid.shape[0]), atol=1e-12)
     assert transition.grid_values.shape == (8, 8)
+    np.testing.assert_allclose(transition.grid_values, expected_transition.grid_values, atol=1e-12)
 
 
 def test_s3r3_dynamic_predict_preserves_mass_and_changes_orientation_weights():
