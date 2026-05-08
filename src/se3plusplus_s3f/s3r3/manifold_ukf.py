@@ -7,11 +7,13 @@ from dataclasses import dataclass
 import numpy as np
 from pyrecest.filters import UKFOnManifolds
 
-from .relaxed_s3f_prototype import (
-    _canonical_quaternions,
-    _exp_map_identity,
-    _quaternion_multiply,
-    _rotate_vectors,
+from .so3_helpers import (
+    canonical_quaternions as _canonical_quaternions,
+    exp_map_identity as _exp_map_identity,
+    log_map_identity as _log_map_identity,
+    quaternion_inverse as _quaternion_inverse,
+    quaternion_multiply as _quaternion_multiply,
+    rotate_vectors as _rotate_vectors,
 )
 
 
@@ -187,18 +189,3 @@ def so3r3_manifold_ukf_orientation(filter_: UKFOnManifolds) -> np.ndarray:
 
     state, _covariance = filter_.filter_state
     return _canonical_quaternions(state.orientation).reshape(4)
-
-
-def _quaternion_inverse(quaternion: np.ndarray) -> np.ndarray:
-    xyzw = _canonical_quaternions(quaternion).reshape(4)
-    return _canonical_quaternions(np.array([-xyzw[0], -xyzw[1], -xyzw[2], xyzw[3]], dtype=float))
-
-
-def _log_map_identity(quaternion: np.ndarray) -> np.ndarray:
-    xyzw = _canonical_quaternions(quaternion).reshape(4)
-    vector = xyzw[:3]
-    vector_norm = float(np.linalg.norm(vector))
-    if vector_norm <= 1e-12:
-        return 2.0 * vector
-    angle = 2.0 * np.arctan2(vector_norm, float(xyzw[3]))
-    return angle * vector / vector_norm
