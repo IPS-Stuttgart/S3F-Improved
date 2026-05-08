@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import json
-import math
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -17,6 +16,7 @@ from pyrecest.distributions.conditional.sd_half_cond_sd_half_grid_distribution i
     SdHalfCondSdHalfGridDistribution,
 )
 from pyrecest.distributions.nonperiodic.gaussian_distribution import GaussianDistribution
+from pyrecest.filters import so3_right_multiplication_grid_transition
 
 from ..s1r2.plotting import save_figure
 from .relaxed_s3f_prototype import (
@@ -254,7 +254,7 @@ def s3r3_orientation_transition_density(
     orientation_increment: np.ndarray | tuple[float, ...],
     orientation_transition_kappa: float,
 ) -> SdHalfCondSdHalfGridDistribution:
-    """Return a normalized soft grid transition for ``q_next = q_current * delta_q``."""
+    """Return a cached PyRecEst soft grid transition for ``q_next = q_current * delta_q``."""
 
     if orientation_transition_kappa <= 0.0:
         raise ValueError("orientation_transition_kappa must be positive.")
@@ -277,17 +277,11 @@ def _cached_orientation_transition_density(
 ) -> SdHalfCondSdHalfGridDistribution:
     grid = np.frombuffer(grid_bytes, dtype=np.float64).reshape(grid_shape)
     delta_quaternion = np.asarray(delta_quaternion_values, dtype=np.float64)
-    targets = _quaternion_multiply(grid, delta_quaternion)
-    inner = np.clip(np.abs(grid @ targets.T), 0.0, 1.0)
-    scores = np.exp(orientation_transition_kappa * (inner**2 - 1.0))
-    column_sums = np.sum(scores, axis=0, keepdims=True)
-    manifold_size = _hemisphere_surface(grid.shape[1] - 1)
-    density_values = scores / column_sums * (grid.shape[0] / manifold_size)
-    return SdHalfCondSdHalfGridDistribution(grid.copy(), density_values, enforce_pdf_nonnegative=True)
-
-
-def _hemisphere_surface(manifold_dimension: int) -> float:
-    return float(2.0 * np.pi ** ((manifold_dimension + 1) / 2.0) / math.gamma((manifold_dimension + 1) / 2.0) / 2.0)
+    return so3_right_multiplication_grid_transition(
+        grid.copy(),
+        delta_quaternion,
+        orientation_transition_kappa,
+    )
 
 
 def _orientation_increment_quaternion(orientation_increment: np.ndarray | tuple[float, ...]) -> np.ndarray:
