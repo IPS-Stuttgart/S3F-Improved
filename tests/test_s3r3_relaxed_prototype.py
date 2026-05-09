@@ -2,11 +2,11 @@ import csv
 import json
 
 import numpy as np
+import pyrecest.filters.relaxed_s3f_so3 as pyrecest_relaxed_s3f_so3
 from pyrecest.filters.hyperhemispherical_grid_filter import HyperhemisphericalGridFilter
 
 from se3plusplus_s3f.s3r3.relaxed_s3f_prototype import (
     S3R3PrototypeConfig,
-    _cached_s3r3_cell_statistics,
     make_s3r3_filter,
     make_s3r3_orientation_filter,
     predict_s3r3_relaxed,
@@ -16,6 +16,11 @@ from se3plusplus_s3f.s3r3.relaxed_s3f_prototype import (
     s3r3_orientation_point_estimate,
     write_s3r3_relaxed_outputs,
 )
+
+
+def test_s3r3_relaxed_helpers_are_reexported_from_pyrecest():
+    assert s3r3_cell_statistics is pyrecest_relaxed_s3f_so3.s3r3_cell_statistics
+    assert predict_s3r3_relaxed is pyrecest_relaxed_s3f_so3.predict_s3r3_relaxed
 
 
 def test_s3r3_cell_statistics_covariance_is_psd():
@@ -33,24 +38,6 @@ def test_s3r3_cell_statistics_covariance_is_psd():
     for covariance in stats.covariance_inflations:
         np.testing.assert_allclose(covariance, covariance.T, atol=1e-12)
         assert np.min(np.linalg.eigvalsh(covariance)) >= -1e-12
-
-
-def test_s3r3_cell_statistics_reuses_identical_grid_cache():
-    _cached_s3r3_cell_statistics.cache_clear()
-    grid = np.array(
-        [
-            [0.0, 0.0, 0.0, 1.0],
-            [0.0, 0.0, np.sin(0.5), np.cos(0.5)],
-        ]
-    )
-
-    stats_a = s3r3_cell_statistics(grid, np.array([0.4, 0.1, 0.2]), cell_sample_count=27)
-    stats_b = s3r3_cell_statistics(grid.copy(), np.array([0.4, 0.1, 0.2]), cell_sample_count=27)
-
-    assert stats_a is stats_b
-    cache_info = _cached_s3r3_cell_statistics.cache_info()
-    assert cache_info.misses == 1
-    assert cache_info.hits == 1
 
 
 def test_s3r3_filter_uses_pyrecest_hyperhemispherical_orientation_basis():
@@ -117,3 +104,4 @@ def test_s3r3_prototype_smoke_outputs_metrics(tmp_path):
     assert metadata["experiment"] == "s3r3_relaxed_prototype"
     assert metadata["config"]["grid_sizes"] == [8]
     assert metadata["metrics_rows"] == 3
+    assert metadata["cell_model"] == "pyrecest.relaxed_s3f_so3.local_tangent_samples"
