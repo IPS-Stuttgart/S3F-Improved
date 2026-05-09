@@ -96,7 +96,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
       # jscpd:ignore-end
-
       # jscpd:ignore-start
       - name: Run and validate dynamic robustness sweep
         run: |
@@ -212,7 +211,6 @@ jobs:
           Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(note.read_text(encoding="utf-8"), encoding="utf-8")
           PY
       # jscpd:ignore-end
-
       - name: Upload S3R3 dynamic robustness artifact
         uses: actions/upload-artifact@v7
         with:
