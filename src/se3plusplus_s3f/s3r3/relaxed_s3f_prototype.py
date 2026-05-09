@@ -1,11 +1,10 @@
-"""Numerical relaxed S3F prototype for S3+ x R3."""
+"""S3+ x R3 relaxed-S3F prototype experiments using PyRecEst helpers."""
 
 from __future__ import annotations
 
 import csv
 import json
 from dataclasses import asdict, dataclass
-from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -20,12 +19,27 @@ from pyrecest.distributions.hypersphere_subset.hyperhemispherical_grid_distribut
 )
 from pyrecest.distributions.nonperiodic.gaussian_distribution import GaussianDistribution
 from pyrecest.filters.hyperhemispherical_grid_filter import HyperhemisphericalGridFilter
+from pyrecest.filters.relaxed_s3f_so3 import (
+    S3R3CellStatistics,
+    SUPPORTED_RELAXED_S3F_SO3_VARIANTS,
+    predict_s3r3_relaxed,
+    s3r3_cell_statistics,
+    s3r3_orientation_distance,
+)
 from pyrecest.filters.state_space_subdivision_filter import StateSpaceSubdivisionFilter
 
 from ..s1r2.plotting import format_plot_list, save_figure
+from .so3_helpers import (
+    canonical_quaternions as _canonical_quaternions,
+    exp_map_identity as _exp_map_identity,
+    geodesic_distance as _geodesic_distance,
+    quaternion_distance_matrix as _quaternion_distance_matrix,
+    quaternion_multiply as _quaternion_multiply,
+    quaternion_to_rotation_matrices as _quaternion_to_rotation_matrices,
+    rotate_vectors as _rotate_vectors,
+)
 
-
-SUPPORTED_S3R3_VARIANTS = ("baseline", "r1", "r1_r2")
+SUPPORTED_S3R3_VARIANTS = SUPPORTED_RELAXED_S3F_SO3_VARIANTS
 VARIANT_LABELS = {
     "baseline": "Baseline S3F",
     "r1": "S3F + R1",
@@ -44,18 +58,6 @@ METRIC_FIELDNAMES = [
     "n_trials",
     "n_steps",
 ]
-
-
-@dataclass(frozen=True)
-class S3R3CellStatistics:
-    """Numerical R1/R2 statistics for local tangent cells around S3+ grid points."""
-
-    grid: np.ndarray
-    cell_radius_rad: float
-    body_increment: np.ndarray
-    representative_displacements: np.ndarray
-    mean_displacements: np.ndarray
-    covariance_inflations: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -215,121 +217,6 @@ def generate_s3r3_trials(config: S3R3PrototypeConfig) -> list[dict[str, np.ndarr
     return _generate_trials(config)
 
 
-def s3r3_cell_statistics(
-    grid: np.ndarray,
-    body_increment: np.ndarray,
-    cell_sample_count: int = 27,
-) -> S3R3CellStatistics:
-    """Compute numerical R1/R2 displacement statistics for local tangent cells on S3+."""
-
-    if cell_sample_count <= 0:
-        raise ValueError("cell_sample_count must be positive.")
-
-    grid = np.ascontiguousarray(_canonical_quaternions(np.asarray(grid, dtype=np.float64)))
-    body_increment = np.asarray(body_increment, dtype=np.float64).reshape(3)
-    return _cached_s3r3_cell_statistics(
-        grid.shape,
-        grid.tobytes(),
-        tuple(float(value) for value in body_increment),
-        int(cell_sample_count),
-    )
-
-
-@lru_cache(maxsize=128)
-def _cached_s3r3_cell_statistics(
-    grid_shape: tuple[int, ...],
-    grid_bytes: bytes,
-    body_increment_values: tuple[float, float, float],
-    cell_sample_count: int,
-) -> S3R3CellStatistics:
-    grid = np.frombuffer(grid_bytes, dtype=np.float64).reshape(grid_shape)
-    body_increment = np.asarray(body_increment_values, dtype=np.float64)
-    return _freeze_cell_statistics(_compute_s3r3_cell_statistics(grid, body_increment, cell_sample_count))
-
-
-def _compute_s3r3_cell_statistics(
-    grid: np.ndarray,
-    body_increment: np.ndarray,
-    cell_sample_count: int,
-) -> S3R3CellStatistics:
-    cell_radius = _estimate_cell_radius(grid)
-    tangent_offsets = _tangent_cell_offsets(cell_radius, cell_sample_count)
-    local_quaternions = _exp_map_identity(tangent_offsets)
-
-    representative_displacements = _rotate_vectors(grid, body_increment)
-    mean_displacements = []
-    covariance_inflations = []
-    for center in grid:
-        center_batch = np.repeat(center.reshape(1, 4), local_quaternions.shape[0], axis=0)
-        sample_quaternions = _quaternion_multiply(center_batch, local_quaternions)
-        displacements = _rotate_vectors(sample_quaternions, body_increment)
-        mean_displacement = np.mean(displacements, axis=0)
-        centered = displacements - mean_displacement
-        covariance = centered.T @ centered / displacements.shape[0]
-        mean_displacements.append(mean_displacement)
-        covariance_inflations.append(_symmetrize(covariance))
-
-    return S3R3CellStatistics(
-        grid=grid,
-        cell_radius_rad=cell_radius,
-        body_increment=body_increment,
-        representative_displacements=representative_displacements,
-        mean_displacements=np.asarray(mean_displacements),
-        covariance_inflations=np.asarray(covariance_inflations),
-    )
-
-
-def _freeze_cell_statistics(stats: S3R3CellStatistics) -> S3R3CellStatistics:
-    for array in (
-        stats.grid,
-        stats.body_increment,
-        stats.representative_displacements,
-        stats.mean_displacements,
-        stats.covariance_inflations,
-    ):
-        array.setflags(write=False)
-    return stats
-
-
-def predict_s3r3_relaxed(
-    filter_: StateSpaceSubdivisionFilter,
-    body_increment: np.ndarray,
-    variant: str = "r1_r2",
-    process_noise_cov: np.ndarray | None = None,
-    cell_sample_count: int = 27,
-) -> S3R3CellStatistics:
-    """Predict an S3+ x R3 S3F with baseline, R1, or R1+R2 displacement statistics."""
-
-    if variant not in SUPPORTED_S3R3_VARIANTS:
-        raise ValueError(f"Unknown variant {variant!r}.")
-
-    state = filter_.filter_state
-    if state.lin_dim != 3:
-        raise ValueError("predict_s3r3_relaxed requires a 3-D linear state.")
-
-    stats = s3r3_cell_statistics(np.asarray(state.gd.get_grid(), dtype=float), body_increment, cell_sample_count)
-    if variant == "baseline":
-        displacements = stats.representative_displacements
-        covariance_inflations = np.zeros_like(stats.covariance_inflations)
-    elif variant == "r1":
-        displacements = stats.mean_displacements
-        covariance_inflations = np.zeros_like(stats.covariance_inflations)
-    else:
-        displacements = stats.mean_displacements
-        covariance_inflations = stats.covariance_inflations
-
-    q_base = np.zeros((3, 3), dtype=float) if process_noise_cov is None else np.asarray(process_noise_cov, dtype=float)
-    if q_base.shape != (3, 3):
-        raise ValueError("process_noise_cov must have shape (3, 3).")
-
-    covariance_matrices = np.stack([q_base + covariance_inflations[idx] for idx in range(displacements.shape[0])], axis=2)
-    filter_.predict_linear(
-        covariance_matrices=covariance_matrices,
-        linear_input_vectors=displacements.T,
-    )
-    return stats
-
-
 def s3r3_linear_position_mean(filter_: StateSpaceSubdivisionFilter) -> np.ndarray:
     """Return the current R3 position mean for an S3+ x R3 S3F state."""
 
@@ -349,12 +236,6 @@ def s3r3_orientation_mode(filter_: StateSpaceSubdivisionFilter) -> np.ndarray:
     weights = np.asarray(state.gd.grid_values, dtype=float)
     grid = _canonical_quaternions(np.asarray(state.gd.get_grid(), dtype=float))
     return grid[int(np.argmax(weights))]
-
-
-def s3r3_orientation_distance(left: np.ndarray, right: np.ndarray) -> float:
-    """Return the antipodal-invariant geodesic distance between two S3+ quaternions."""
-
-    return _geodesic_distance(left, right)
 
 
 def _run_variant(
@@ -460,28 +341,6 @@ def _orientation_prior_values(grid: np.ndarray, config: S3R3PrototypeConfig) -> 
     return values + 1e-12
 
 
-def _estimate_cell_radius(grid: np.ndarray) -> float:
-    if grid.shape[0] <= 1:
-        return np.pi
-    distances = _quaternion_distance_matrix(grid)
-    distances[distances == 0.0] = np.inf
-    nearest = np.min(distances, axis=1)
-    return float(max(0.5 * np.median(nearest), 1e-6))
-
-
-def _tangent_cell_offsets(cell_radius: float, sample_count: int) -> np.ndarray:
-    levels = int(np.ceil(sample_count ** (1.0 / 3.0)))
-    if levels % 2 == 0:
-        levels += 1
-    while levels**3 < sample_count:
-        levels += 2
-    axis_values = np.linspace(-cell_radius, cell_radius, levels)
-    mesh = np.stack(np.meshgrid(axis_values, axis_values, axis_values, indexing="ij"), axis=-1).reshape(-1, 3)
-    norms = np.linalg.norm(mesh, axis=1)
-    order = np.lexsort((mesh[:, 2], mesh[:, 1], mesh[:, 0], norms))
-    return mesh[order[:sample_count]]
-
-
 def _linear_position_error_stats(filter_: StateSpaceSubdivisionFilter, true_position: np.ndarray) -> tuple[np.ndarray, float]:
     state = filter_.filter_state
     error = np.subtract(
@@ -504,82 +363,6 @@ def _orientation_mode_error(filter_: StateSpaceSubdivisionFilter, true_orientati
     return s3r3_orientation_distance(s3r3_orientation_mode(filter_), true_orientation)
 
 
-def _canonical_quaternions(quaternions: np.ndarray) -> np.ndarray:
-    quaternions = np.asarray(quaternions, dtype=float)
-    original_shape = quaternions.shape
-    quaternions = quaternions.reshape(-1, 4)
-    norms = np.linalg.norm(quaternions, axis=1)
-    if np.any(norms <= 0.0):
-        raise ValueError("quaternions must be nonzero.")
-    normalized = quaternions / norms[:, None]
-    normalized = np.where(normalized[:, 3:4] < 0.0, -normalized, normalized)
-    return normalized.reshape(original_shape)
-
-
-def _quaternion_multiply(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    left = _canonical_quaternions(left)
-    right = _canonical_quaternions(right)
-    x1, y1, z1, w1 = left[..., 0], left[..., 1], left[..., 2], left[..., 3]
-    x2, y2, z2, w2 = right[..., 0], right[..., 1], right[..., 2], right[..., 3]
-    product = np.stack(
-        (
-            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
-            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-        ),
-        axis=-1,
-    )
-    return _canonical_quaternions(product)
-
-
-def _exp_map_identity(tangent_vectors: np.ndarray) -> np.ndarray:
-    tangent_vectors = np.asarray(tangent_vectors, dtype=float).reshape(-1, 3)
-    angles = np.linalg.norm(tangent_vectors, axis=1)
-    safe_angles = np.where(angles > 1e-12, angles, 1.0)
-    vector_scale = np.where(
-        angles > 1e-12,
-        np.sin(0.5 * angles) / safe_angles,
-        0.5 - angles**2 / 48.0,
-    )
-    quaternions = np.concatenate(
-        (tangent_vectors * vector_scale[:, None], np.cos(0.5 * angles)[:, None]),
-        axis=1,
-    )
-    return _canonical_quaternions(quaternions)
-
-
-def _quaternion_to_rotation_matrices(quaternions: np.ndarray) -> np.ndarray:
-    quaternions = _canonical_quaternions(quaternions).reshape(-1, 4)
-    x, y, z, w = quaternions[:, 0], quaternions[:, 1], quaternions[:, 2], quaternions[:, 3]
-    row_0 = np.stack((1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)), axis=1)
-    row_1 = np.stack((2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)), axis=1)
-    row_2 = np.stack((2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)), axis=1)
-    return np.stack((row_0, row_1, row_2), axis=1)
-
-
-def _rotate_vectors(quaternions: np.ndarray, vector: np.ndarray) -> np.ndarray:
-    matrices = _quaternion_to_rotation_matrices(quaternions)
-    return np.einsum("nij,j->ni", matrices, np.asarray(vector, dtype=float).reshape(3))
-
-
-def _quaternion_distance_matrix(quaternions: np.ndarray) -> np.ndarray:
-    quaternions = _canonical_quaternions(quaternions)
-    inner = np.clip(np.abs(quaternions @ quaternions.T), 0.0, 1.0)
-    return 2.0 * np.arccos(inner)
-
-
-def _geodesic_distance(left: np.ndarray, right: np.ndarray) -> float:
-    left = _canonical_quaternions(left).reshape(4)
-    right = _canonical_quaternions(right).reshape(4)
-    inner = float(np.clip(abs(left @ right), 0.0, 1.0))
-    return 2.0 * float(np.arccos(inner))
-
-
-def _symmetrize(matrix: np.ndarray) -> np.ndarray:
-    return 0.5 * (matrix + matrix.T)
-
-
 def _write_csv(path: Path, rows: list[dict[str, float | int | str]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=METRIC_FIELDNAMES, extrasaction="ignore")
@@ -598,7 +381,7 @@ def _write_metadata(
         "config": s3r3_prototype_config_to_dict(config),
         "metrics_schema": METRIC_FIELDNAMES,
         "metrics_rows": len(rows),
-        "cell_model": "local_tangent_samples",
+        "cell_model": "pyrecest.relaxed_s3f_so3.local_tangent_samples",
     }
     path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -614,8 +397,8 @@ def _write_note(
     lines = [
         "# S3+ x R3 Relaxed S3F Prototype",
         "",
-        "This prototype uses a PyRecEst hyperhemispherical quaternion grid and one Gaussian R3 position component per grid point.",
-        "R1/R2 statistics are estimated from deterministic local tangent samples around each grid quaternion, not from exact S3+ Voronoi-cell integrals.",
+        "This prototype uses PyRecEst's S3+ x R3 relaxed S3F prediction helpers with a hyperhemispherical quaternion grid and one Gaussian R3 position component per grid point.",
+        "R1/R2 statistics are provided by `pyrecest.filters.relaxed_s3f_so3` using deterministic local tangent samples around each grid quaternion, not exact S3+ Voronoi-cell integrals.",
         "",
         f"Trials: {config.n_trials}",
         f"Steps per trial: {config.n_steps}",
@@ -689,4 +472,7 @@ def _metric_series(
         (row for row in rows if row["variant"] == variant),
         key=lambda row: int(row["grid_size"]),
     )
-    return [int(row["grid_size"]) for row in ordered_rows], [float(row[metric]) for row in ordered_rows]
+    return (
+        [int(row["grid_size"]) for row in ordered_rows],
+        [float(row[metric]) for row in ordered_rows],
+    )
