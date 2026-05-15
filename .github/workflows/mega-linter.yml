@@ -123,7 +123,6 @@ jobs:
             .github/workflows/**
             .mega-linter.yml
             .jscpd.json
-            .markdownlint.json
             .yamllint.yml
             pyproject.toml
             README.md
